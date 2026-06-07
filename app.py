@@ -94,24 +94,34 @@ for socio in SOCIOS:
 conn.commit()
 
 # ==========================
-# COOKIES Y LOGIN INTELIGENTE (Evita cierres al dar F5)
+# COOKIES Y LOGIN INTELIGENTE (Versión Web Estable)
 # ==========================
 
+import time  # Asegúrate de tener esta importación arriba si no existe
+
 cookie_manager = stx.CookieManager()
+
+# !!! TRUCO CLAVE PARA LA WEB !!!
+# Forzamos al sistema a esperar hasta 3 segundos a que las cookies carguen en el navegador
+# Esto evita que el código se ejecute en blanco y te bote con F5
+with st.spinner("Verificando sesión..."):
+    for _ in range(30):  # Intenta 30 veces (3 segundos en total)
+        cookie_usuario = cookie_manager.get(cookie="villan_user")
+        if cookie_usuario is not None:
+            break
+        time.sleep(0.1)
 
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
-# Intentamos recuperar una sesión guardada en el navegador
-cookie_usuario = cookie_manager.get(cookie="villan_user")
-
+# Si encontramos la cookie y no estaba logueado en la pestaña, lo dejamos pasar
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario
 
-# Si no está logueado ni tiene pases válidos, pide login
+# Si no está logueado ni tiene cookies guardadas, pide contraseña
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
 
@@ -132,7 +142,7 @@ if not st.session_state.logueado:
             st.session_state.logueado = True
             st.session_state.usuario_actual = resultado[0].lower()
             
-            # Guardamos el pase de acceso en el navegador por 30 días
+            # Guardamos la cookie en el navegador por 30 días
             cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto")
             st.rerun()
