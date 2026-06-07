@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import sqlite3
 from datetime import datetime
+import extra_streamlit_components as stx  # Sistema de cookies para recordar sesión
 
 # =====================================
 # CONFIGURACIÓN
@@ -93,14 +94,24 @@ for socio in SOCIOS:
 conn.commit()
 
 # ==========================
-# LOGIN
+# COOKIES Y LOGIN INTELIGENTE (Evita cierres al dar F5)
 # ==========================
+
+cookie_manager = stx.CookieManager()
 
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
+# Intentamos recuperar una sesión guardada en el navegador
+cookie_usuario = cookie_manager.get(cookie="villan_user")
+
+if cookie_usuario and not st.session_state.logueado:
+    st.session_state.logueado = True
+    st.session_state.usuario_actual = cookie_usuario
+
+# Si no está logueado ni tiene pases válidos, pide login
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
 
@@ -120,6 +131,9 @@ if not st.session_state.logueado:
         if resultado:
             st.session_state.logueado = True
             st.session_state.usuario_actual = resultado[0].lower()
+            
+            # Guardamos el pase de acceso en el navegador por 30 días
+            cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto")
             st.rerun()
         else:
@@ -171,15 +185,16 @@ es_socio = st.session_state.usuario_actual in SOCIOS
 if es_socio:
     opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuarios"]
 else:
-    # Para los vendedores, la pantalla por defecto al entrar será Ventas
     opciones_menu = ["Ventas", "Inventario"]
 
 menu = st.sidebar.selectbox("Menú", opciones_menu)
 
 if st.sidebar.button("Cerrar Sesión"):
+    # Borramos el pase del navegador al cerrar sesión a propósito
+    cookie_manager.delete(cookie="villan_user")
+    
     st.session_state.logueado = False
     st.session_state.usuario_actual = ""
-    # Limpiamos memoria para asegurar recarga limpia al cambiar de usuario
     st.session_state.pop("ventas", None)
     st.session_state.pop("gastos", None)
     st.session_state.pop("inventario", None)
@@ -203,7 +218,6 @@ if menu == "Ventas":
     cliente = st.text_input("Cliente").strip().title()
     precio = st.number_input("Precio de Venta", min_value=0.0)
     
-    # CONTROL DE COSTOS: Un vendedor no tiene por qué ver los costos mayoristas
     if es_socio:
         costo = st.number_input("Costo (Precio Mayorista)", min_value=0.0)
     else:
@@ -260,7 +274,6 @@ if menu == "Ventas":
         df_ventas.index = range(1, len(df_ventas) + 1)
         
         st.subheader("📋 Ventas Registradas (Historial General)")
-        # Si es vendedor, le ocultamos las columnas de Costo y Utilidad
         if not es_socio:
             df_ventas_publicas = df_ventas.drop(columns=["Costo", "Utilidad"])
             st.dataframe(df_ventas_publicas, use_container_width=True)
@@ -275,8 +288,6 @@ if menu == "Ventas":
         )
 
         venta = st.session_state.ventas[venta_eliminar]
-        
-        # REGLA DE ORO: Un socio puede borrar TODO. Un vendedor SOLO su propia venta.
         puede_eliminar = es_socio or (st.session_state.usuario_actual == venta["Vendedor"])
 
         if puede_eliminar:
@@ -309,7 +320,6 @@ if menu == "Ventas":
 elif menu == "Inventario":
     st.title("📦 Inventario VILLAN")
 
-    # Solo los socios pueden AGREGAR stock masivo al inventario
     if es_socio:
         st.subheader("➕ Agregar / Modificar Stock")
         producto_input = st.text_input("Producto")
@@ -340,7 +350,6 @@ elif menu == "Inventario":
             st.rerun()
         st.divider()
 
-    # Esto lo ven tanto vendedores como socios (Vital para la venta)
     if st.session_state.inventario:
         df_inv = pd.DataFrame(st.session_state.inventario)
         st.subheader("📦 Inventario Actual Disponible")
@@ -400,7 +409,7 @@ elif menu == "Gestionar Usuarios" and es_socio:
     st.title("👥 Control de Usuarios - VILLAN")
     
     st.subheader("➕ Registrar Nuevo Empleado o Socio")
-    nuevo_usuario = st.text_input("Nombre de Usuario (Ej: ivan, eddy, larry)").strip().lower()
+    nuevo_usuario = st.text_input("Nombre de Usuario").strip().lower()
     nueva_clave = st.text_input("Contraseña para el usuario", type="password")
     
     if st.button("Crear Usuario"):
@@ -424,7 +433,6 @@ elif menu == "Gestionar Usuarios" and es_socio:
     st.dataframe(df_usuarios, use_container_width=True)
     
     st.subheader("🗑 Eliminar Acceso")
-    # Protegemos para que ningún socio elimine las cuentas de socios por error
     usuarios_eliminables = [u for u in lista_usuarios if u[1] not in SOCIOS]
     
     if usuarios_eliminables:
@@ -482,4 +490,4 @@ elif menu == "Dashboard" and es_socio:
         st.bar_chart(df_gastos["Categoría"].value_counts())
 
     st.divider()
-    st.info("ERP VILLAN v5.0 - Edición Multiusuario Protegida")
+    st.info("ERP VILLAN v6.0 - Edición Web Protegida con Cookies")
