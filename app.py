@@ -155,19 +155,17 @@ for socio in SOCIOS:
     ejecutar_query("INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, '1234')", (socio,))
 
 # ===================================================
-# 🔒 GESTIÓN DE SESIÓN
+# 🔒 GESTIÓN DE SESIÓN (CORREGIDO PARA EVITAR ADVERTENCIAS)
 # ===================================================
-@st.cache_resource(show_spinner=False)
-def obtener_gestor_cookies():
-    return stx.CookieManager(key="villan_manager")
-
-cookie_manager = obtener_gestor_cookies()
+# Inicializamos el gestor de cookies directamente sin decorar con caché
+cookie_manager = stx.CookieManager(key="villan_manager")
 
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
+# Se lee la cookie conservada en el navegador del usuario
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
 if cookie_usuario and not st.session_state.logueado:
