@@ -15,13 +15,68 @@ st.set_page_config(
     layout="wide"
 )
 
-# Colocamos el logo con protección contra errores
+# =====================================
+# DISEÑO DE INTERFAZ PREMIUM Y ANIMACIONES (CSS)
+# =====================================
+st.markdown("""
+    <style>
+    /* 1. Animación de entrada suave para toda la app */
+    .stApp {
+        animation: fadeIn 1.2s ease-in-out;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 2. Efecto de brillo y pulso para el Logo de VILLAN */
+    [data-testid="stSidebarHeader"] img {
+        filter: drop-shadow(0px 0px 8px rgba(222, 255, 154, 0.6));
+        animation: pulseLogo 3s infinite ease-in-out;
+        transition: transform 0.3s ease;
+    }
+    [data-testid="stSidebarHeader"] img:hover {
+        transform: scale(1.05) rotate(2deg);
+    }
+    @keyframes pulseLogo {
+        0%, 100% { filter: drop-shadow(0px 0px 6px rgba(222, 255, 154, 0.4)); }
+        50% { filter: drop-shadow(0px 0px 14px rgba(222, 255, 154, 0.8)); }
+    }
+
+    /* 3. Tarjetas de métricas interactivas (Efecto Hover moderno) */
+    div[data-testid="stMetric"] {
+        background: #151515 !important;
+        border: 1px solid #252525 !important;
+        border-radius: 16px !important;
+        padding: 20px 25px !important;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2) !important;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-5px) !important;
+        border-color: #deff9a !important; /* Color verde/limón de acento corporativo */
+        box-shadow: 0 12px 20px rgba(222, 255, 154, 0.1) !important;
+    }
+
+    /* 4. Suavizar transiciones en los botones */
+    .stButton>button {
+        transition: all 0.2s ease !important;
+        border-radius: 8px !important;
+    }
+    .stButton>button:hover {
+        transform: scale(1.02) !important;
+    }
+    </style>
+""", unsafe_allow_allow_html=True)
+
+# Colocamos el logo en la barra lateral con protección contra errores
 try:
     st.logo("logo.png", size="large")
 except Exception:
-    # Si la imagen en GitHub sigue vacía o falla, 
-    # muestra texto para que la web NO se caiga.
     st.sidebar.markdown("### 📊 ERP VILLAN")
+
+# LISTA DE SOCIOS
+SOCIOS = ["cesar", "larry", "jahairo"]
 # LISTA DE SOCIOS
 SOCIOS = ["cesar", "larry", "jahairo"]
 
