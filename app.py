@@ -5,6 +5,13 @@ import sqlite3
 from datetime import datetime
 import extra_streamlit_components as stx  # Sistema de cookies
 import time
+import warnings
+
+# =====================================
+# SILENCIAR ADVERTENCIA AMARILLA SIN ROMPER EL F5
+# =====================================
+# Esto oculta el "CachedWidgetWarning" sin tener que quitar la caché que salva la sesión
+warnings.filterwarnings("ignore", message=".*CachedWidgetWarning.*")
 
 # =====================================
 # CONFIGURACIÓN (¡SIEMPRE PRIMERO!)
@@ -24,21 +31,29 @@ st.markdown("""
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 
     <style>
+    /* Aplicar tipografía moderna a toda la aplicación */
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         background-color: #0b0c10 !important;
     }
+
+    /* Títulos con estilo Cyber/Urbano */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Space Grotesk', sans-serif !important;
         letter-spacing: -0.5px !important;
     }
+
+    /* DISEÑO DE LA BARRA LATERAL */
     [data-testid="stSidebar"] {
         background-color: #111217 !important;
         border-right: 1px solid rgba(222, 255, 154, 0.05) !important;
     }
+    
     [data-testid="stSidebarHeader"] img {
         filter: drop-shadow(0px 4px 10px rgba(222, 255, 154, 0.2));
     }
+
+    /* TARJETAS DE MÉTRICAS */
     div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #16171d, #111216) !important;
         border: 1px solid rgba(255, 255, 255, 0.04) !important;
@@ -46,9 +61,11 @@ st.markdown("""
         padding: 24px !important;
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
     }
+    
     div[data-testid="stMetric"]:hover {
         border-color: rgba(222, 255, 154, 0.5) !important;
     }
+    
     div[data-testid="stMetricLabel"] {
         font-size: 14px !important;
         text-transform: uppercase !important;
@@ -61,6 +78,8 @@ st.markdown("""
         font-weight: 700 !important;
         color: #ffffff !important;
     }
+
+    /* BOTONES ESTILO NEÓN */
     .stButton>button, .stDownloadButton>button {
         background: #16171d !important;
         color: #ffffff !important;
@@ -154,24 +173,28 @@ for socio in SOCIOS:
 conn.commit()
 
 # ===================================================
-# 🔒 GESTIÓN DE SESIÓN ASÍNCRONA (PROPUESTA CÉSAR)
+# 🔒 GESTIÓN DE SESIÓN (RESTAURADA A SU ESTADO FUNCIONAL)
 # ===================================================
-cookie_manager = stx.CookieManager()
+# La caché es OBLIGATORIA aquí para que el F5 funcione y no te bote
+@st.cache_resource(show_spinner=False)
+def obtener_gestor_cookies():
+    return stx.CookieManager(key="villan_manager")
+
+cookie_manager = obtener_gestor_cookies()
 
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
-# Leer cookie del navegador de forma pasiva
+# Se lee la cookie conservada por la caché del servidor al presionar F5
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
-# Si la cookie está disponible y no se ha reflejado en sesión, la recuperamos
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario.lower()
 
-# Renderizado de la Pantalla de Login (Protección contra falsos negativos de F5)
+# Pantalla de Login
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -187,13 +210,14 @@ if not st.session_state.logueado:
             st.session_state.usuario_actual = resultado[0].lower()
             cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto")
+            time.sleep(0.5)
             st.rerun()
         else:
             st.error("Usuario o contraseña incorrectos")
     st.stop()
 
 # =====================================
-# CARGA DE DATOS EN MEMORIA REAL-TIME
+# CARGA DE DATOS EN MEMORIA
 # =====================================
 if "ventas" not in st.session_state:
     cursor.execute("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas")
@@ -214,19 +238,22 @@ if "inventario" not in st.session_state:
     ]
 
 # =====================================
-# MENÚ NATIVO SEGÚN ROL DE USUARIO
+# MENÚ
 # =====================================
 es_socio = st.session_state.usuario_actual in SOCIOS
 opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuarios"] if es_socio else ["Ventas", "Inventario"]
 
 menu = st.sidebar.selectbox("Menú", opciones_menu)
 
-# Cierre de sesión quirúrgico y limpio sin romper estados internos
 if st.sidebar.button("❌ Cerrar Sesión"):
     cookie_manager.delete(cookie="villan_user")
-    time.sleep(0.2)
-    st.session_state.pop("logueado", None)
-    st.session_state.pop("usuario_actual", None)
+    st.session_state.logueado = False
+    st.session_state.usuario_actual = ""
+    # Se limpian los datos en memoria para el próximo usuario
+    for key in ["ventas", "gastos", "inventario"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    time.sleep(0.5)
     st.rerun()
 
 # =====================================
