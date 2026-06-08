@@ -15,9 +15,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# Colocamos el logo en la parte superior de la barra lateral de forma nativa
-st.logo("logo.png", size="large")
-
+# Colocamos el logo con protección contra errores
+try:
+    st.logo("logo.png", size="large")
+except Exception:
+    # Si la imagen en GitHub sigue vacía o falla, 
+    # muestra texto para que la web NO se caiga.
+    st.sidebar.markdown("### 📊 ERP VILLAN")
 # LISTA DE SOCIOS
 SOCIOS = ["cesar", "larry", "jahairo"]
 
