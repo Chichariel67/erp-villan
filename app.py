@@ -170,28 +170,31 @@ for socio in SOCIOS:
 conn.commit()
 
 # ===================================================
-# 🔒 GESTIÓN DE COOKIES INTEGRAL (SIN REBOOT AL ACTUALIZAR)
+# 🔒 COOKIES REPARADAS (SIN CACHE_RESOURCE / NO TE BOTA)
 # ===================================================
-@st.cache_resource
-def obtener_gestor_cookies():
-    return stx.CookieManager()
+cookie_manager = stx.CookieManager()
 
-cookie_manager = obtener_gestor_cookies()
-
-# Inicializar estados de sesión si no existen
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
+if "inicializado" not in st.session_state:
+    st.session_state.inicializado = False
 
-# Lectura directa del navegador para recuperar la sesión al actualizar (F5)
+# Pequeña pausa asíncrona solo en el primer render para asegurar lectura de cookies
+if not st.session_state.inicializado:
+    time.sleep(0.4)
+    st.session_state.inicializado = True
+    st.rerun()
+
+# Recuperar la cookie del navegador sin bloqueos
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario.lower()
 
-# Pantalla de Login (Solo si la cookie y el session_state están completamente vacíos)
+# Interfaz de Inicio de Sesión
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -205,7 +208,6 @@ if not st.session_state.logueado:
         if resultado:
             st.session_state.logueado = True
             st.session_state.usuario_actual = resultado[0].lower()
-            # Guardamos la cookie por 30 días para evitar que se borre al cerrar la pestaña
             cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto")
             st.rerun()
@@ -214,7 +216,7 @@ if not st.session_state.logueado:
     st.stop()
 
 # =====================================
-# CARGA DE DATOS EN ESTADO GLOBAL
+# CARGA DE DATOS EN MEMORIA REAL-TIME
 # =====================================
 if "ventas" not in st.session_state:
     cursor.execute("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas")
@@ -235,7 +237,7 @@ if "inventario" not in st.session_state:
     ]
 
 # =====================================
-# MENÚ NATIVO SEGÚN ROL
+# MENÚ NATIVO SEGÚN ROL DE USUARIO
 # =====================================
 es_socio = st.session_state.usuario_actual in SOCIOS
 opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuarios"] if es_socio else ["Ventas", "Inventario"]
