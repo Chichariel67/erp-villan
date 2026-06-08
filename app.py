@@ -10,7 +10,6 @@ import warnings
 # =====================================
 # SILENCIAR ADVERTENCIA AMARILLA SIN ROMPER EL F5
 # =====================================
-# Esto oculta el "CachedWidgetWarning" sin tener que quitar la caché que salva la sesión
 warnings.filterwarnings("ignore", message=".*CachedWidgetWarning.*")
 
 # =====================================
@@ -18,7 +17,7 @@ warnings.filterwarnings("ignore", message=".*CachedWidgetWarning.*")
 # =====================================
 st.set_page_config(
     page_title="ERP VILLAN",
-    page_icon="logo.png",
+    page_icon="📊",  # Cambiado temporalmente por si no encuentra "logo.png"
     layout="wide"
 )
 
@@ -31,19 +30,16 @@ st.markdown("""
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 
     <style>
-    /* Aplicar tipografía moderna a toda la aplicación */
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         background-color: #0b0c10 !important;
     }
 
-    /* Títulos con estilo Cyber/Urbano */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Space Grotesk', sans-serif !important;
         letter-spacing: -0.5px !important;
     }
 
-    /* DISEÑO DE LA BARRA LATERAL */
     [data-testid="stSidebar"] {
         background-color: #111217 !important;
         border-right: 1px solid rgba(222, 255, 154, 0.05) !important;
@@ -53,7 +49,6 @@ st.markdown("""
         filter: drop-shadow(0px 4px 10px rgba(222, 255, 154, 0.2));
     }
 
-    /* TARJETAS DE MÉTRICAS */
     div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #16171d, #111216) !important;
         border: 1px solid rgba(255, 255, 255, 0.04) !important;
@@ -79,7 +74,6 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* BOTONES ESTILO NEÓN */
     .stButton>button, .stDownloadButton>button {
         background: #16171d !important;
         color: #ffffff !important;
@@ -104,78 +98,65 @@ except Exception:
     st.sidebar.markdown("### 📊 ERP VILLAN")
 
 SOCIOS = ["cesar", "larry", "jahairo"]
+DB_NAME = "villan.db"
 
-# ==========================
-# CONEXIÓN SQLITE
-# ==========================
-conn = sqlite3.connect("villan.db", check_same_thread=False, timeout=20)
-cursor = conn.cursor()
+# =====================================
+# FUNCIONES SECORES DE BASE DE DATOS (HILOS SEGUROS)
+# =====================================
+def ejecutar_query(query, params=(), traer_datos=False, ejecutar_muchos=False):
+    """Maneja la apertura y cierre de conexiones de manera segura para evitar corrupciones."""
+    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+        cursor = conn.cursor()
+        if ejecutar_muchos:
+            cursor.executemany(query, params)
+        else:
+            cursor.execute(query, params)
+        
+        if traer_datos:
+            return cursor.fetchall()
+        conn.commit()
 
-cursor.execute("""
+# Inicialización de tablas
+ejecutar_query("""
 CREATE TABLE IF NOT EXISTS ventas(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT,
-    mes TEXT,
-    anio INTEGER,
-    sku TEXT,
-    producto TEXT,
-    categoria TEXT,
-    talla TEXT,
-    canal TEXT,
-    cliente TEXT,
-    precio REAL,
-    costo REAL,
-    utilidad REAL,
-    vendedor TEXT
-)
-""")
+    id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, mes TEXT, anio INTEGER,
+    sku TEXT, producto TEXT, categoria TEXT, talla TEXT, canal TEXT,
+    cliente TEXT, precio REAL, costo REAL, utilidad REAL, vendedor TEXT
+)""")
 
-cursor.execute("""
+ejecutar_query("""
 CREATE TABLE IF NOT EXISTS gastos(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT,
-    mes TEXT,
-    anio INTEGER,
-    concepto TEXT,
-    categoria TEXT,
-    responsable TEXT,
-    monto REAL
-)
-""")
+    id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, mes TEXT, anio INTEGER,
+    concepto TEXT, categoria TEXT, responsable TEXT, monto REAL
+)""")
 
-cursor.execute("""
+ejecutar_query("""
 CREATE TABLE IF NOT EXISTS inventario(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    producto TEXT,
-    categoria TEXT,
-    talla TEXT,
-    stock INTEGER
-)
-""")
+    id INTEGER PRIMARY KEY AUTOINCREMENT, producto TEXT, categoria TEXT, talla TEXT, stock INTEGER, costo_base REAL DEFAULT 0.0
+)""")
 
-cursor.execute("""
+ejecutar_query("""
 CREATE TABLE IF NOT EXISTS usuarios(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario TEXT UNIQUE,
-    clave TEXT
-)
-""")
-conn.commit()
+    id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE, clave TEXT
+)""")
+
+# Migración e inserción de socios por defecto
+try:
+    ejecutar_query("ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'")
+except sqlite3.OperationalError:
+    pass
 
 try:
-    cursor.execute("ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'")
-    conn.commit()
+    ejecutar_query("ALTER TABLE inventario ADD COLUMN costo_base REAL DEFAULT 0.0")
 except sqlite3.OperationalError:
     pass
 
 for socio in SOCIOS:
-    cursor.execute("INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, '1234')", (socio,))
-conn.commit()
+    ejecutar_query("INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, '1234')", (socio,))
 
 # ===================================================
-# 🔒 GESTIÓN DE SESIÓN (RESTAURADA A SU ESTADO FUNCIONAL)
+# 🔒 GESTIÓN DE SESIÓN
 # ===================================================
-# La caché es OBLIGATORIA aquí para que el F5 funcione y no te bote
 @st.cache_resource(show_spinner=False)
 def obtener_gestor_cookies():
     return stx.CookieManager(key="villan_manager")
@@ -187,14 +168,13 @@ if "logueado" not in st.session_state:
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
-# Se lee la cookie conservada por la caché del servidor al presionar F5
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario.lower()
 
-# Pantalla de Login
+# --- PANTALLA DE LOGIN ---
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -202,13 +182,12 @@ if not st.session_state.logueado:
 
     if st.button("Ingresar"):
         u_limpio = usuario_input.strip().lower()
-        cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(usuario) = ? AND clave = ?", (u_limpio, clave))
-        resultado = cursor.fetchone()
+        resultado = ejecutar_query("SELECT usuario FROM usuarios WHERE LOWER(usuario) = ? AND clave = ?", (u_limpio, clave), traer_datos=True)
 
         if resultado:
             st.session_state.logueado = True
-            st.session_state.usuario_actual = resultado[0].lower()
-            cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
+            st.session_state.usuario_actual = resultado[0][0].lower()
+            cookie_manager.set(cookie="villan_user", val=resultado[0][0].lower(), max_age=2592000)
             st.success("Acceso correcto")
             time.sleep(0.5)
             st.rerun()
@@ -217,28 +196,28 @@ if not st.session_state.logueado:
     st.stop()
 
 # =====================================
-# CARGA DE DATOS EN MEMORIA
+# CARGA O SINCRONIZACIÓN DE DATOS EN MEMORIA
 # =====================================
 if "ventas" not in st.session_state:
-    cursor.execute("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas")
+    datos = ejecutar_query("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas", traer_datos=True)
     st.session_state.ventas = [
-        {"Fecha": x[0], "Mes": x[1], "Año": x[2], "SKU": x[3], "Producto": x[4], "Categoría": x[5], "Talla": x[6], "Canal": x[7], "Cliente": x[8], "Precio": x[9], "Costo": x[10], "Utilidad": x[11], "Vendedor": x[12]} for x in cursor.fetchall()
+        {"Fecha": x[0], "Mes": x[1], "Año": x[2], "SKU": x[3], "Producto": x[4], "Categoría": x[5], "Talla": x[6], "Canal": x[7], "Cliente": x[8], "Precio": x[9], "Costo": x[10], "Utilidad": x[11], "Vendedor": x[12]} for x in datos
     ]
 
 if "gastos" not in st.session_state:
-    cursor.execute("SELECT fecha, mes, anio, concepto, categoria, responsable, monto FROM gastos")
+    datos = ejecutar_query("SELECT fecha, mes, anio, concepto, categoria, responsable, monto FROM gastos", traer_datos=True)
     st.session_state.gastos = [
-        {"Fecha": x[0], "Mes": x[1], "Año": x[2], "Concepto": x[3], "Categoría": x[4], "Responsable": x[5], "Monto": x[6]} for x in cursor.fetchall()
+        {"Fecha": x[0], "Mes": x[1], "Año": x[2], "Concepto": x[3], "Categoría": x[4], "Responsable": x[5], "Monto": x[6]} for x in datos
     ]
 
 if "inventario" not in st.session_state:
-    cursor.execute("SELECT producto, categoria, talla, stock FROM inventario")
+    datos = ejecutar_query("SELECT producto, categoria, talla, stock, costo_base FROM inventario", traer_datos=True)
     st.session_state.inventario = [
-        {"Producto": x[0], "Categoría": x[1], "Talla": x[2], "Stock": x[3]} for x in cursor.fetchall()
+        {"Producto": x[0], "Categoría": x[1], "Talla": x[2], "Stock": x[3], "Costo_Base": x[4]} for x in datos
     ]
 
 # =====================================
-# MENÚ
+# MENÚ LATERAL
 # =====================================
 es_socio = st.session_state.usuario_actual in SOCIOS
 opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuarios"] if es_socio else ["Ventas", "Inventario"]
@@ -249,7 +228,6 @@ if st.sidebar.button("❌ Cerrar Sesión"):
     cookie_manager.delete(cookie="villan_user")
     st.session_state.logueado = False
     st.session_state.usuario_actual = ""
-    # Se limpian los datos en memoria para el próximo usuario
     for key in ["ventas", "gastos", "inventario"]:
         if key in st.session_state:
             del st.session_state[key]
@@ -257,8 +235,9 @@ if st.sidebar.button("❌ Cerrar Sesión"):
     st.rerun()
 
 # =====================================
-# SECCIÓN: DASHBOARD
+# MÓDULOS DEL SISTEMA
 # =====================================
+
 if menu == "Dashboard" and es_socio:
     st.title("📊 Balance General Financiero")
     st.write(f"👋 ¡Bienvenido Socio, **{st.session_state.usuario_actual.title()}**!")
@@ -282,23 +261,17 @@ if menu == "Dashboard" and es_socio:
         st.subheader("🏆 Prendas Más Vendidas")
         st.bar_chart(df_ventas["SKU"].value_counts())
 
-# =====================================
-# SECCIÓN: VENTAS
-# =====================================
 elif menu == "Ventas":
     st.title("🛒 Registro de Ventas")
     st.write(f"👤 Atendido por: **{st.session_state.usuario_actual.title()}**")
 
-    if not st.session_state.inventario:
-        st.info("No hay productos disponibles en el almacén. Por favor, registra stock en la pestaña de Inventario.")
+    if not st.session_state.inventario or sum(item['Stock'] for item in st.session_state.inventario) == 0:
+        st.info("No hay productos con stock disponible en el almacén.")
     else:
         with st.form("formulario_ventas_villan"):
-            opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und" for item in st.session_state.inventario]
+            opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und" for item in st.session_state.inventario if item['Stock'] > 0]
             prenda_seleccionada = st.selectbox("Selecciona el artículo vendido desde el Almacén:", opciones_prendas)
             
-            idx_sel = opciones_prendas.index(prenda_seleccionada)
-            prenda_objeto = st.session_state.inventario[idx_sel]
-
             col1, col2 = st.columns(2)
             with col1:
                 fecha = st.date_input("Fecha de Venta", datetime.now())
@@ -306,35 +279,34 @@ elif menu == "Ventas":
                 cliente = st.text_input("Nombre del Cliente", "Cliente General")
             with col2:
                 precio = st.number_input("Precio de Venta cobrado (S/)", min_value=0.0, value=89.90)
-                if es_socio:
-                    costo = st.number_input("Costo de Fábrica base (S/)", min_value=0.0, value=40.0)
-                else:
-                    costo = 0.0
-
+                
             guardar_venta = st.form_submit_button("🚀 Registrar Transacción")
 
         if guardar_venta:
-            if prenda_objeto["Stock"] <= 0:
-                st.error("❌ Error: No se puede vender este artículo porque no queda stock disponible en almacén.")
-            else:
-                prenda_objeto["Stock"] -= 1
-                cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (prenda_objeto["Stock"], prenda_objeto["Producto"], prenda_objeto["Talla"]))
-                
-                utilidad = precio - costo
-                sku_generado = f"{prenda_objeto['Producto']} {prenda_objeto['Talla']}"
-                vendedor_actual = st.session_state.usuario_actual
+            idx_sel = opciones_prendas.index(prenda_seleccionada)
+            # Encontrar el objeto real filtrando solo los que tienen stock activo
+            prenda_objeto = [item for item in st.session_state.inventario if item['Stock'] > 0][idx_sel]
 
-                cursor.execute("""
-                    INSERT INTO ventas(fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (fecha.strftime("%d/%m/%Y"), fecha.strftime("%m"), fecha.year, sku_generado, prenda_objeto['Producto'], prenda_objeto['Categoría'], prenda_objeto['Talla'], canal, cliente, precio, costo, utilidad, vendedor_actual))
-                conn.commit()
+            prenda_objeto["Stock"] -= 1
+            ejecutar_query("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (prenda_objeto["Stock"], prenda_objeto["Producto"], prenda_objeto["Talla"]))
+            
+            # Corrección: El costo se hereda automáticamente del inventario para no alterar las utilidades corporativas reales
+            costo_real = prenda_objeto.get("Costo_Base", 0.0)
+            utilidad_calculada = precio - costo_real
+            sku_generado = f"{prenda_objeto['Producto']} {prenda_objeto['Talla']}"
+            vendedor_actual = st.session_state.usuario_actual
 
-                st.session_state.ventas.append({
-                    "Fecha": fecha.strftime("%d/%m/%Y"), "Mes": fecha.strftime("%m"), "Año": fecha.year, "SKU": sku_generado, "Producto": prenda_objeto['Producto'], "Categoría": prenda_objeto['Categoría'], "Talla": prenda_objeto['Talla'], "Canal": canal, "Cliente": cliente, "Precio": precio, "Costo": costo, "Utilidad": utilidad, "Vendedor": vendedor_actual
-                })
-                st.success("✅ Venta añadida al historial de manera exitosa.")
-                st.rerun()
+            ejecutar_query("""
+                INSERT INTO ventas(fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (fecha.strftime("%d/%m/%Y"), fecha.strftime("%m"), fecha.year, sku_generado, prenda_objeto['Producto'], prenda_objeto['Categoría'], prenda_objeto['Talla'], canal, cliente, precio, costo_real, utilidad_calculada, vendedor_actual))
+
+            st.session_state.ventas.append({
+                "Fecha": fecha.strftime("%d/%m/%Y"), "Mes": fecha.strftime("%m"), "Año": fecha.year, "SKU": sku_generado, "Producto": prenda_objeto['Producto'], "Categoría": prenda_objeto['Categoría'], "Talla": prenda_objeto['Talla'], "Canal": canal, "Cliente": cliente, "Precio": precio, "Costo": costo_real, "Utilidad": utilidad_calculada, "Vendedor": vendedor_actual
+            })
+            st.success("✅ Venta añadida al historial de manera exitosa.")
+            time.sleep(0.4)
+            st.rerun()
 
     st.divider()
     if st.session_state.ventas:
@@ -366,17 +338,14 @@ elif menu == "Ventas":
                 for item in st.session_state.inventario:
                     if item["Producto"] == v_sel["Producto"] and item["Talla"] == v_sel["Talla"]:
                         item["Stock"] += 1
-                        cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], item["Producto"], item["Talla"]))
+                        ejecutar_query("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], item["Producto"], item["Talla"]))
                         break
-                cursor.execute("DELETE FROM ventas WHERE fecha=? AND sku=? AND precio=? AND cliente=? AND vendedor=?", (v_sel['Fecha'], v_sel['SKU'], v_sel['Precio'], v_sel['Cliente'], v_sel['Vendedor']))
-                conn.commit()
+                ejecutar_query("DELETE FROM ventas WHERE fecha=? AND sku=? AND precio=? AND cliente=? AND vendedor=?", (v_sel['Fecha'], v_sel['SKU'], v_sel['Precio'], v_sel['Cliente'], v_sel['Vendedor']))
                 st.session_state.ventas.pop(venta_eliminar)
                 st.success("Venta removida correctamente y stock devuelto.")
+                time.sleep(0.4)
                 st.rerun()
 
-# =====================================
-# SECCIÓN: INVENTARIO
-# =====================================
 elif menu == "Inventario":
     st.title("📦 Almacén e Inventario VILLAN")
 
@@ -387,6 +356,7 @@ elif menu == "Inventario":
             cat = st.selectbox("Categoría", ["Pantalón", "Polo", "Polera", "Casaca", "Short", "Otro"])
             tll = st.selectbox("Talla", ["XS", "S", "M", "L", "XL", "XXL"])
             stk = st.number_input("Unidades que ingresan", min_value=1, step=1)
+            c_base = st.number_input("Costo de fábrica unitario (S/)", min_value=0.0, value=40.0)
 
             if st.button("Guardar Stock en Almacén"):
                 if prod:
@@ -394,32 +364,33 @@ elif menu == "Inventario":
                     for item in st.session_state.inventario:
                         if item["Producto"] == prod and item["Talla"] == tll:
                             item["Stock"] += stk
-                            cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], prod, tll))
+                            item["Costo_Base"] = c_base  # Actualiza el costo base por si cambió
+                            ejecutar_query("UPDATE inventario SET stock = ?, costo_base = ? WHERE producto = ? AND talla = ?", (item["Stock"], c_base, prod, tll))
                             ex = True
                             break
                     if not ex:
-                        st.session_state.inventario.append({"Producto": prod, "Categoría": cat, "Talla": tll, "Stock": stk})
-                        cursor.execute("INSERT INTO inventario(producto, categoria, talla, stock) VALUES(?,?,?,?)", (prod, cat, tll, stk))
-                    conn.commit()
+                        st.session_state.inventario.append({"Producto": prod, "Categoría": cat, "Talla": tll, "Stock": stk, "Costo_Base": c_base})
+                        ejecutar_query("INSERT INTO inventario(producto, categoria, talla, stock, costo_base) VALUES(?,?,?,?,?)", (prod, cat, tll, stk, c_base))
                     st.success("Inventario actualizado de forma exitosa.")
+                    time.sleep(0.4)
                     st.rerun()
 
     if st.session_state.inventario:
         df_inv = pd.DataFrame(st.session_state.inventario)
         df_inv.index = range(1, len(df_inv) + 1)
         st.subheader("📋 Stock Físico Disponible")
-        st.dataframe(df_inv, use_container_width=True)
+        
+        # Ocultar costo base a los vendedores
+        df_inv_mostrar = df_inv if es_socio else df_inv.drop(columns=["Costo_Base"])
+        st.dataframe(df_inv_mostrar, use_container_width=True)
 
         st.subheader("⚠ Alertas de Stock Crítico (3 unidades o menos)")
-        bajo = df_inv[df_inv["Stock"] <= 3]
+        bajo = df_inv_mostrar[df_inv_mostrar["Stock"] <= 3]
         if not bajo.empty:
             st.dataframe(bajo, use_container_width=True)
         else:
             st.success("Todo en orden. Almacén con stock óptimo.")
 
-# =====================================
-# SECCIÓN: GASTOS
-# =====================================
 elif menu == "Gastos" and es_socio:
     st.title("💸 Control de Gastos")
     f_g = st.date_input("Fecha", datetime.now())
@@ -429,26 +400,25 @@ elif menu == "Gastos" and es_socio:
     mon = st.number_input("Monto total pagado (S/)", min_value=0.0)
 
     if st.button("Registrar Gasto"):
-        cursor.execute("INSERT INTO gastos(fecha, mes, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?)", (f_g.strftime("%d/%m/%Y"), f_g.strftime("%m"), f_g.year, con, cat, resp, mon))
-        conn.commit()
-        st.session_state.gastos.append({"Fecha": f_g.strftime("%d/%m/%Y"), "Mes": f_g.strftime("%m"), "Año": f_g.year, "Concepto": con, "Categoría": cat, "Responsable": resp, "Monto": mon})
-        st.success("Gasto guardado de forma conforme.")
-        st.rerun()
+        if con and resp and mon > 0:
+            ejecutar_query("INSERT INTO gastos(fecha, mes, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?)", (f_g.strftime("%d/%m/%Y"), f_g.strftime("%m"), f_g.year, con, cat, resp, mon))
+            st.session_state.gastos.append({"Fecha": f_g.strftime("%d/%m/%Y"), "Mes": f_g.strftime("%m"), "Año": f_g.year, "Concepto": con, "Categoría": cat, "Responsable": resp, "Monto": mon})
+            st.success("Gasto guardado de forma conforme.")
+            time.sleep(0.4)
+            st.rerun()
+        else:
+            st.error("Por favor completa todos los campos con montos válidos.")
 
     if st.session_state.gastos:
         df_gastos = pd.DataFrame(st.session_state.gastos)
         df_gastos.index = range(1, len(df_gastos) + 1)
         st.dataframe(df_gastos, use_container_width=True)
 
-# =====================================
-# 👥 SECCIÓN: GESTIONAR USUARIOS
-# =====================================
 elif menu == "Gestionar Usuarios" and es_socio:
     st.title("👥 Panel de Control de Personal")
     
     st.subheader("📋 Usuarios Registrados con Acceso al Sistema")
-    cursor.execute("SELECT id, usuario FROM usuarios")
-    lista_usuarios = cursor.fetchall()
+    lista_usuarios = ejecutar_query("SELECT id, usuario FROM usuarios", traer_datos=True)
     df_usuarios = pd.DataFrame(lista_usuarios, columns=["ID_Sistema", "Nombre_Usuario"])
     df_usuarios.index = range(1, len(df_usuarios) + 1)
     st.dataframe(df_usuarios, use_container_width=True)
@@ -464,9 +434,9 @@ elif menu == "Gestionar Usuarios" and es_socio:
             st.error("❌ Ambos campos son obligatorios.")
         else:
             try:
-                cursor.execute("INSERT INTO usuarios(usuario, clave) VALUES(?, ?)", (nuevo_usuario, nueva_clave))
-                conn.commit()
+                ejecutar_query("INSERT INTO usuarios(usuario, clave) VALUES(?, ?)", (nuevo_usuario, nueva_clave))
                 st.success(f"✅ Usuario '{nuevo_usuario}' creado con éxito.")
+                time.sleep(0.4)
                 st.rerun()
             except sqlite3.IntegrityError:
                 st.error("❌ Ese nombre de usuario ya existe. Elige otro.")
@@ -487,9 +457,9 @@ elif menu == "Gestionar Usuarios" and es_socio:
             id_borrar = usuarios_eliminables[usuario_a_borrar][0]
             nom_borrar = usuarios_eliminables[usuario_a_borrar][1]
             
-            cursor.execute("DELETE FROM usuarios WHERE id = ?", (id_borrar,))
-            conn.commit()
+            ejecutar_query("DELETE FROM usuarios WHERE id = ?", (id_borrar,))
             st.success(f"🗑 El acceso para '{nom_borrar}' ha sido revocado.")
+            time.sleep(0.4)
             st.rerun()
     else:
         st.info("No hay usuarios asignados como vendedores adicionales para eliminar.")
