@@ -223,12 +223,20 @@ opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuar
 menu = st.sidebar.selectbox("Menú", opciones_menu)
 
 if st.sidebar.button("❌ Cerrar Sesión"):
-    cookie_manager.delete(cookie="villan_user")
+    try:
+        # Forzamos un valor vacío y luego eliminamos de forma segura
+        cookie_manager.set(cookie="villan_user", val="")
+        cookie_manager.delete(cookie="villan_user")
+    except Exception:
+        pass
+        
     st.session_state.logueado = False
     st.session_state.usuario_actual = ""
+    
     for key in ["ventas", "gastos", "inventario"]:
         if key in st.session_state:
             del st.session_state[key]
+            
     time.sleep(0.5)
     st.rerun()
 
