@@ -24,30 +24,21 @@ st.markdown("""
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 
     <style>
-    /* Aplicar tipografía moderna a toda la aplicación */
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        background-color: #0b0c10 !important; /* Fondo oscuro cinematográfico */
+        background-color: #0b0c10 !important;
     }
-
-    /* Títulos con estilo Cyber/Urbano */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Space Grotesk', sans-serif !important;
         letter-spacing: -0.5px !important;
     }
-
-    /* DISEÑO DE LA BARRA LATERAL (SIDEBAR) FLOTANTE */
     [data-testid="stSidebar"] {
         background-color: #111217 !important;
         border-right: 1px solid rgba(222, 255, 154, 0.05) !important;
     }
-    
-    /* El logo con efecto respiración de luz de fondo (Glow) */
     [data-testid="stSidebarHeader"] img {
         filter: drop-shadow(0px 4px 10px rgba(222, 255, 154, 0.2));
     }
-
-    /* TARJETAS DE MÉTRICAS INTERACTIVAS (GRID PREMIUM) */
     div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #16171d, #111216) !important;
         border: 1px solid rgba(255, 255, 255, 0.04) !important;
@@ -55,13 +46,9 @@ st.markdown("""
         padding: 24px !important;
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
     }
-    
-    /* Efecto cuando pasas el mouse por encima de las tarjetas */
     div[data-testid="stMetric"]:hover {
-        border-color: rgba(222, 255, 154, 0.5) !important; /* Borde verde limón neón */
+        border-color: rgba(222, 255, 154, 0.5) !important;
     }
-    
-    /* Estilizar el texto dentro de las métricas */
     div[data-testid="stMetricLabel"] {
         font-size: 14px !important;
         text-transform: uppercase !important;
@@ -74,8 +61,6 @@ st.markdown("""
         font-weight: 700 !important;
         color: #ffffff !important;
     }
-
-    /* BOTONES ESTILO NEÓN INTERACTIVO */
     .stButton>button, .stDownloadButton>button {
         background: #16171d !important;
         color: #ffffff !important;
@@ -87,8 +72,8 @@ st.markdown("""
         width: 100%;
     }
     .stButton>button:hover, .stDownloadButton>button:hover {
-        background: #deff9a !important; /* Fondo verde limón en hover */
-        color: #000000 !important; /* Texto negro para contraste */
+        background: #deff9a !important;
+        color: #000000 !important;
         border-color: #deff9a !important;
     }
     </style>
@@ -99,7 +84,6 @@ try:
 except Exception:
     st.sidebar.markdown("### 📊 ERP VILLAN")
 
-# LISTA DE SOCIOS
 SOCIOS = ["cesar", "larry", "jahairo"]
 
 # ==========================
@@ -170,7 +154,7 @@ for socio in SOCIOS:
 conn.commit()
 
 # ===================================================
-# 🔒 COOKIES REPARADAS (SIN CACHE_RESOURCE / NO TE BOTA)
+# 🔒 GESTIÓN DE SESIÓN ASÍNCRONA (PROPUESTA CÉSAR)
 # ===================================================
 cookie_manager = stx.CookieManager()
 
@@ -178,23 +162,16 @@ if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
-if "inicializado" not in st.session_state:
-    st.session_state.inicializado = False
 
-# Pequeña pausa asíncrona solo en el primer render para asegurar lectura de cookies
-if not st.session_state.inicializado:
-    time.sleep(0.4)
-    st.session_state.inicializado = True
-    st.rerun()
-
-# Recuperar la cookie del navegador sin bloqueos
+# Leer cookie del navegador de forma pasiva
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
+# Si la cookie está disponible y no se ha reflejado en sesión, la recuperamos
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario.lower()
 
-# Interfaz de Inicio de Sesión
+# Renderizado de la Pantalla de Login (Protección contra falsos negativos de F5)
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -244,12 +221,12 @@ opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuar
 
 menu = st.sidebar.selectbox("Menú", opciones_menu)
 
+# Cierre de sesión quirúrgico y limpio sin romper estados internos
 if st.sidebar.button("❌ Cerrar Sesión"):
     cookie_manager.delete(cookie="villan_user")
     time.sleep(0.2)
-    st.session_state.logueado = False
-    st.session_state.usuario_actual = ""
-    st.session_state.clear()
+    st.session_state.pop("logueado", None)
+    st.session_state.pop("usuario_actual", None)
     st.rerun()
 
 # =====================================
