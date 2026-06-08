@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import sqlite3
+import hashlib
 from datetime import datetime
 import extra_streamlit_components as stx
 import time
@@ -22,37 +23,28 @@ st.set_page_config(
 # =====================================================================
 # 2. DISEÑO VISUAL ULTRA-PREMIUM (ESTILO PLOMO MATE)
 # =====================================================================
-# Se ha implementado una paleta en tonos plomo mate oscuro para evitar el negro básico,
-# logrando un contraste más elegante y técnico para la marca.
 st.markdown("""
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 
     <style>
-    /* Fondo principal en plomo mate profundo */
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        background-color: #2b2c30 !important; 
+        background-color: #2b2c30 !important;
     }
-
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Space Grotesk', sans-serif !important;
         letter-spacing: -0.5px !important;
         color: #f0f0f0 !important;
     }
-
-    /* Barra lateral en un plomo mate un poco más oscuro para dar profundidad */
     [data-testid="stSidebar"] {
         background-color: #1e1f22 !important;
         border-right: 1px solid rgba(222, 255, 154, 0.1) !important;
     }
-    
     [data-testid="stSidebarHeader"] img {
         filter: drop-shadow(0px 4px 10px rgba(222, 255, 154, 0.2));
     }
-
-    /* Tarjetas de métricas */
     div[data-testid="stMetric"] {
         background: linear-gradient(145deg, #36383d, #2b2c30) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -60,11 +52,9 @@ st.markdown("""
         padding: 24px !important;
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2) !important;
     }
-    
     div[data-testid="stMetric"]:hover {
         border-color: rgba(222, 255, 154, 0.5) !important;
     }
-    
     div[data-testid="stMetricLabel"] {
         font-size: 14px !important;
         text-transform: uppercase !important;
@@ -77,8 +67,6 @@ st.markdown("""
         font-weight: 700 !important;
         color: #ffffff !important;
     }
-
-    /* Botones de acción general */
     .stButton>button, .stDownloadButton>button {
         background: #36383d !important;
         color: #ffffff !important;
@@ -109,17 +97,31 @@ except Exception:
 SOCIOS = ["cesar", "larry", "jahairo"]
 DB_NAME = "villan.db"
 
+MESES = {
+    "01": "Enero", "02": "Febrero", "03": "Marzo", "04": "Abril",
+    "05": "Mayo", "06": "Junio", "07": "Julio", "08": "Agosto",
+    "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
+}
+
+# =====================================================================
+# FIX #4: Contraseñas con hash SHA-256 en lugar de texto plano
+# =====================================================================
+def hashear_clave(clave: str) -> str:
+    return hashlib.sha256(clave.encode()).hexdigest()
+
+
 def inicializar_base_datos():
     """Crea las tablas asegurando que cada conexión se abra y cierre correctamente."""
     with sqlite3.connect(DB_NAME, timeout=20) as conn:
         cursor = conn.cursor()
-        
-        # Tabla Ventas
+
+        # Tabla Ventas — incluye id explícito para DELETE seguro (FIX #1)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS ventas(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT,
             mes TEXT,
+            mes_nombre TEXT,
             anio INTEGER,
             sku TEXT,
             producto TEXT,
@@ -133,13 +135,14 @@ def inicializar_base_datos():
             vendedor TEXT DEFAULT 'admin'
         )
         """)
-        
-        # Tabla Gastos
+
+        # Tabla Gastos — incluye id para futura anulación (FIX #8)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS gastos(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT,
             mes TEXT,
+            mes_nombre TEXT,
             anio INTEGER,
             concepto TEXT,
             categoria TEXT,
@@ -147,7 +150,7 @@ def inicializar_base_datos():
             monto REAL
         )
         """)
-        
+
         # Tabla Inventario
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventario(
@@ -159,8 +162,8 @@ def inicializar_base_datos():
             costo_base REAL DEFAULT 0.0
         )
         """)
-        
-        # Tabla Usuarios
+
+        # Tabla Usuarios — clave guardada como hash
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,92 +171,139 @@ def inicializar_base_datos():
             clave TEXT
         )
         """)
-        
-        # Migraciones (por si la tabla existe pero le faltan columnas nuevas)
-        try:
-            cursor.execute("ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'")
-        except sqlite3.OperationalError:
-            pass
 
-        try:
-            cursor.execute("ALTER TABLE inventario ADD COLUMN costo_base REAL DEFAULT 0.0")
-        except sqlite3.OperationalError:
-            pass
+        # ── Migraciones defensivas ──────────────────────────────────
+        for col_sql in [
+            "ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'",
+            "ALTER TABLE ventas ADD COLUMN mes_nombre TEXT DEFAULT ''",
+            "ALTER TABLE gastos ADD COLUMN mes_nombre TEXT DEFAULT ''",
+            "ALTER TABLE inventario ADD COLUMN costo_base REAL DEFAULT 0.0",
+        ]:
+            try:
+                cursor.execute(col_sql)
+            except sqlite3.OperationalError:
+                pass
 
-        # Asegurar que los socios existan en el sistema
+        # ── Migración de contraseñas en texto plano a hash ──────────
+        # Si algún usuario tiene clave sin hash (longitud != 64), la migramos.
+        cursor.execute("SELECT id, clave FROM usuarios")
+        for uid, clave in cursor.fetchall():
+            if len(clave) != 64:  # SHA-256 hex = 64 chars
+                cursor.execute("UPDATE usuarios SET clave = ? WHERE id = ?", (hashear_clave(clave), uid))
+
+        # Asegurar socios con clave '1234' hasheada
+        clave_default = hashear_clave("1234")
         for socio in SOCIOS:
-            cursor.execute("INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, '1234')", (socio,))
-            
+            cursor.execute(
+                "INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, ?)",
+                (socio, clave_default)
+            )
+
         conn.commit()
 
-# Ejecutar inicialización de DB
+
 inicializar_base_datos()
 
 # =====================================================================
-# 4. GESTIÓN DE SESIÓN EXPLICITA Y SEGURA
+# 4. GESTIÓN DE SESIÓN
 # =====================================================================
 cookie_manager = stx.CookieManager(key="villan_manager")
 
-# Inicializamos el estado de manera explícita
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
-# Leemos la cookie actual
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
-# Si hay cookie válida y no estábamos logueados, restauramos la sesión
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario.lower()
 
 # =====================================================================
-# 5. CARGA DE DATOS EN MEMORIA (AL CARGAR LA APP)
+# 5. CARGA DE DATOS EN MEMORIA
+# FIX #2: Función separada para forzar recarga desde DB cuando se necesite
 # =====================================================================
-def cargar_datos_memoria():
-    """Carga los datos de SQLite a st.session_state para uso rápido"""
+def cargar_ventas_db():
     with sqlite3.connect(DB_NAME, timeout=20) as conn:
         cursor = conn.cursor()
-        
-        if "ventas" not in st.session_state:
-            cursor.execute("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas")
-            st.session_state.ventas = [
-                {"Fecha": x[0], "Mes": x[1], "Año": x[2], "SKU": x[3], "Producto": x[4], "Categoría": x[5], "Talla": x[6], "Canal": x[7], "Cliente": x[8], "Precio": x[9], "Costo": x[10], "Utilidad": x[11], "Vendedor": x[12]} for x in cursor.fetchall()
-            ]
+        cursor.execute("""
+            SELECT id, fecha, mes, mes_nombre, anio, sku, producto, categoria,
+                   talla, canal, cliente, precio, costo, utilidad, vendedor
+            FROM ventas
+        """)
+        st.session_state.ventas = [
+            {
+                "id": x[0], "Fecha": x[1], "Mes": x[2], "Mes_Nombre": x[3],
+                "Año": x[4], "SKU": x[5], "Producto": x[6], "Categoría": x[7],
+                "Talla": x[8], "Canal": x[9], "Cliente": x[10],
+                "Precio": x[11], "Costo": x[12], "Utilidad": x[13], "Vendedor": x[14]
+            }
+            for x in cursor.fetchall()
+        ]
 
-        if "gastos" not in st.session_state:
-            cursor.execute("SELECT fecha, mes, anio, concepto, categoria, responsable, monto FROM gastos")
-            st.session_state.gastos = [
-                {"Fecha": x[0], "Mes": x[1], "Año": x[2], "Concepto": x[3], "Categoría": x[4], "Responsable": x[5], "Monto": x[6]} for x in cursor.fetchall()
-            ]
 
-        if "inventario" not in st.session_state:
-            cursor.execute("SELECT producto, categoria, talla, stock, costo_base FROM inventario")
-            st.session_state.inventario = [
-                {"Producto": x[0], "Categoría": x[1], "Talla": x[2], "Stock": x[3], "Costo_Base": x[4]} for x in cursor.fetchall()
-            ]
+def cargar_gastos_db():
+    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, fecha, mes, mes_nombre, anio, concepto, categoria, responsable, monto
+            FROM gastos
+        """)
+        st.session_state.gastos = [
+            {
+                "id": x[0], "Fecha": x[1], "Mes": x[2], "Mes_Nombre": x[3],
+                "Año": x[4], "Concepto": x[5], "Categoría": x[6],
+                "Responsable": x[7], "Monto": x[8]
+            }
+            for x in cursor.fetchall()
+        ]
+
+
+def cargar_inventario_db():
+    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, producto, categoria, talla, stock, costo_base FROM inventario")
+        st.session_state.inventario = [
+            {
+                "id": x[0], "Producto": x[1], "Categoría": x[2],
+                "Talla": x[3], "Stock": x[4], "Costo_Base": x[5]
+            }
+            for x in cursor.fetchall()
+        ]
+
+
+def cargar_datos_memoria():
+    """Carga todos los datos desde DB a session_state (solo si aún no están cargados)."""
+    if "ventas" not in st.session_state:
+        cargar_ventas_db()
+    if "gastos" not in st.session_state:
+        cargar_gastos_db()
+    if "inventario" not in st.session_state:
+        cargar_inventario_db()
+
 
 # =====================================================================
-# 6. ESTRUCTURA PRINCIPAL DE VISTAS (SEPARACIÓN LOGIN VS APP)
+# 6. ESTRUCTURA PRINCIPAL
 # =====================================================================
-
 if not st.session_state.logueado:
-    # -----------------------------------------------------------------
-    # VISTA DE LOGIN
-    # -----------------------------------------------------------------
+    # ── LOGIN ────────────────────────────────────────────────────────
     st.title("🔐 ERP VILLAN")
     st.write("Por favor, identifícate para ingresar al sistema.")
-    
+
     usuario_input = st.text_input("Usuario")
     clave = st.text_input("Contraseña", type="password")
 
     if st.button("Ingresar"):
         u_limpio = usuario_input.strip().lower()
-        
+        clave_hash = hashear_clave(clave)  # FIX #4: comparar contra hash
+
         with sqlite3.connect(DB_NAME, timeout=20) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT usuario FROM usuarios WHERE LOWER(usuario) = ? AND clave = ?", (u_limpio, clave))
+            cursor.execute(
+                "SELECT usuario FROM usuarios WHERE LOWER(usuario) = ? AND clave = ?",
+                (u_limpio, clave_hash)
+            )
             resultado = cursor.fetchone()
 
         if resultado:
@@ -261,19 +311,17 @@ if not st.session_state.logueado:
             st.session_state.usuario_actual = resultado[0].lower()
             cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto. Preparando entorno...")
-            time.sleep(1) # Pequeña pausa para asegurar la escritura de la cookie
+            time.sleep(1)
             st.rerun()
         else:
             st.error("❌ Usuario o contraseña incorrectos")
 
 else:
-    # -----------------------------------------------------------------
-    # VISTA PRINCIPAL DEL SISTEMA ERP
-    # -----------------------------------------------------------------
+    # ── APP PRINCIPAL ────────────────────────────────────────────────
     cargar_datos_memoria()
-    
+
     es_socio = st.session_state.usuario_actual in SOCIOS
-    
+
     if es_socio:
         opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuarios"]
     else:
@@ -281,45 +329,63 @@ else:
 
     menu = st.sidebar.selectbox("Menú de Navegación", opciones_menu)
 
-    # --- LÓGICA DE CIERRE DE SESIÓN A PRUEBA DE FALLOS ---
+    # ── Botón de actualizar datos (FIX #2) ──────────────────────────
+    if st.sidebar.button("🔄 Actualizar Datos"):
+        cargar_ventas_db()
+        cargar_gastos_db()
+        cargar_inventario_db()
+        st.rerun()
+
+    # ── Cierre de sesión ─────────────────────────────────────────────
     if st.sidebar.button("❌ Cerrar Sesión"):
-        # 1. Intentamos eliminar la cookie de manera segura
         try:
             cookie_manager.delete(cookie="villan_user")
         except Exception:
-            pass # Si falla, no importa, el estado de sesión manda.
-            
-        # 2. Reseteamos las variables de autenticación
+            pass
+
         st.session_state.logueado = False
         st.session_state.usuario_actual = ""
-        
-        # 3. Limpiamos toda la memoria de datos explícitamente
-        claves_a_borrar = ["ventas", "gastos", "inventario"]
-        for clave in claves_a_borrar:
-            if clave in st.session_state:
-                del st.session_state[clave]
-                
-        # 4. Pausa de 1 segundo clave. Esto le da tiempo al navegador de procesar el javascript
-        # que borra la cookie ANTES de recargar la página. Evita el pantallazo negro.
+
+        for clave_estado in ["ventas", "gastos", "inventario"]:
+            if clave_estado in st.session_state:
+                del st.session_state[clave_estado]
+
         time.sleep(1.0)
         st.rerun()
 
-    # =====================================
+    # ================================================================
     # MÓDULO: DASHBOARD
-    # =====================================
+    # ================================================================
     if menu == "Dashboard" and es_socio:
         st.title("📊 Balance General Financiero")
         st.write(f"👋 ¡Bienvenido Socio, **{st.session_state.usuario_actual.title()}**!")
 
-        total_ventas = sum(float(x["Precio"]) for x in st.session_state.ventas)
-        total_costos = sum(float(x["Costo"]) for x in st.session_state.ventas)
-        total_gastos = sum(float(x["Monto"]) for x in st.session_state.gastos)
-        
+        # ── Filtros de período ───────────────────────────────────────
+        años_disponibles = sorted(set(v["Año"] for v in st.session_state.ventas), reverse=True) if st.session_state.ventas else [datetime.now().year]
+        col_f1, col_f2 = st.columns([1, 3])
+        with col_f1:
+            año_sel = st.selectbox("Filtrar por Año", ["Todos"] + [str(a) for a in años_disponibles])
+        with col_f2:
+            meses_disp = ["Todos"] + list(MESES.values())
+            mes_sel = st.selectbox("Filtrar por Mes", meses_disp)
+
+        # Aplicar filtros
+        ventas_filtradas = st.session_state.ventas
+        gastos_filtrados = st.session_state.gastos
+
+        if año_sel != "Todos":
+            ventas_filtradas = [v for v in ventas_filtradas if str(v["Año"]) == año_sel]
+            gastos_filtrados = [g for g in gastos_filtrados if str(g["Año"]) == año_sel]
+
+        if mes_sel != "Todos":
+            ventas_filtradas = [v for v in ventas_filtradas if v.get("Mes_Nombre") == mes_sel]
+            gastos_filtrados = [g for g in gastos_filtrados if g.get("Mes_Nombre") == mes_sel]
+
+        total_ventas = sum(float(x["Precio"]) for x in ventas_filtradas)
+        total_costos = sum(float(x["Costo"]) for x in ventas_filtradas)
+        total_gastos = sum(float(x["Monto"]) for x in gastos_filtrados)
         utilidad = total_ventas - total_costos - total_gastos
-        if total_ventas > 0:
-            margen = (utilidad / total_ventas) * 100
-        else:
-            margen = 0.0
+        margen = (utilidad / total_ventas * 100) if total_ventas > 0 else 0.0
 
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Ventas Totales", f"S/ {total_ventas:,.2f}")
@@ -329,100 +395,130 @@ else:
         c5.metric("Margen Beneficio", f"{margen:.2f}%")
 
         st.divider()
-        if st.session_state.ventas:
-            df_ventas = pd.DataFrame(st.session_state.ventas)
+
+        if ventas_filtradas:
+            df_ventas = pd.DataFrame(ventas_filtradas)
             st.subheader("🏆 Prendas Más Vendidas por SKU")
             conteo_ventas = df_ventas["SKU"].value_counts()
             st.bar_chart(conteo_ventas)
 
-    # =====================================
+            st.subheader("📅 Ventas por Mes")
+            ventas_mes = df_ventas.groupby("Mes_Nombre")["Precio"].sum().sort_index()
+            st.bar_chart(ventas_mes)
+
+    # ================================================================
     # MÓDULO: VENTAS
-    # =====================================
+    # ================================================================
     elif menu == "Ventas":
         st.title("🛒 Registro de Transacciones de Venta")
         st.write(f"👤 Atendido por: **{st.session_state.usuario_actual.title()}**")
 
-        inventario_disponible = [item for item in st.session_state.inventario if item['Stock'] > 0]
+        inventario_disponible = [item for item in st.session_state.inventario if item["Stock"] > 0]
 
         if not inventario_disponible:
             st.info("⚠️ No hay productos con stock disponible en el almacén en este momento.")
         else:
             with st.form("formulario_ventas_villan"):
                 st.subheader("Nueva Venta")
-                opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und" for item in inventario_disponible]
+                opciones_prendas = [
+                    f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und"
+                    for item in inventario_disponible
+                ]
                 prenda_seleccionada = st.selectbox("Selecciona el artículo a vender:", opciones_prendas)
-                
+
                 col1, col2 = st.columns(2)
                 with col1:
                     fecha = st.date_input("Fecha de Venta", datetime.now())
                     canal = st.selectbox("Canal de Venta", ["Tienda Física", "Instagram", "WhatsApp", "TikTok", "Otro"])
                     cliente = st.text_input("Nombre del Cliente", "Cliente General")
                 with col2:
-                    precio = st.number_input("Precio final cobrado (S/)", min_value=0.0, value=89.90, step=1.0)
-                    
+                    precio = st.number_input("Precio final cobrado (S/)", min_value=1.0, value=89.90, step=1.0)
+
                 guardar_venta = st.form_submit_button("🚀 Registrar y Descontar Stock")
 
             if guardar_venta:
-                # Recuperar el objeto exacto seleccionado
                 idx_sel = opciones_prendas.index(prenda_seleccionada)
                 prenda_objeto = inventario_disponible[idx_sel]
 
-                # Validación doble de seguridad
                 if prenda_objeto["Stock"] <= 0:
                     st.error("❌ Error Crítico: Se intentó vender un producto sin stock.")
                 else:
-                    # 1. Actualizar Stock en DB
                     nuevo_stock = prenda_objeto["Stock"] - 1
+                    costo_real = float(prenda_objeto.get("Costo_Base", 0.0))
+                    utilidad_calculada = float(precio) - costo_real
+
+                    # FIX #5: SKU más robusto con timestamp para evitar colisiones
+                    ts = datetime.now().strftime("%H%M%S")
+                    sku_generado = f"{prenda_objeto['Producto'][:3].upper()}-{prenda_objeto['Talla']}-{ts}"
+
+                    vendedor_actual = st.session_state.usuario_actual
+                    fecha_str = fecha.strftime("%d/%m/%Y")
+                    mes_str = fecha.strftime("%m")
+                    mes_nombre = MESES[mes_str]
+                    anio_int = fecha.year
+
                     with sqlite3.connect(DB_NAME, timeout=20) as conn:
                         cursor = conn.cursor()
-                        cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (nuevo_stock, prenda_objeto["Producto"], prenda_objeto["Talla"]))
-                        
-                        # 2. Calcular Utilidad y Costo
-                        costo_real = float(prenda_objeto.get("Costo_Base", 0.0))
-                        utilidad_calculada = float(precio) - costo_real
-                        sku_generado = f"{prenda_objeto['Producto']} {prenda_objeto['Talla']}"
-                        vendedor_actual = st.session_state.usuario_actual
-                        fecha_str = fecha.strftime("%d/%m/%Y")
-                        mes_str = fecha.strftime("%m")
-                        anio_int = fecha.year
-
-                        # 3. Registrar Venta en DB
+                        # Actualizar stock en DB usando id del inventario (más seguro)
+                        cursor.execute(
+                            "UPDATE inventario SET stock = ? WHERE id = ?",
+                            (nuevo_stock, prenda_objeto["id"])
+                        )
+                        # Registrar venta
                         cursor.execute("""
-                            INSERT INTO ventas(fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor)
-                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-                        """, (fecha_str, mes_str, anio_int, sku_generado, prenda_objeto['Producto'], prenda_objeto['Categoría'], prenda_objeto['Talla'], canal, cliente, precio, costo_real, utilidad_calculada, vendedor_actual))
+                            INSERT INTO ventas(fecha, mes, mes_nombre, anio, sku, producto, categoria,
+                                               talla, canal, cliente, precio, costo, utilidad, vendedor)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            fecha_str, mes_str, mes_nombre, anio_int, sku_generado,
+                            prenda_objeto["Producto"], prenda_objeto["Categoría"],
+                            prenda_objeto["Talla"], canal, cliente,
+                            precio, costo_real, utilidad_calculada, vendedor_actual
+                        ))
+                        nuevo_id = cursor.lastrowid
                         conn.commit()
 
-                    # 4. Actualizar Memoria Local
-                    prenda_objeto["Stock"] = nuevo_stock # Actualiza la lista en memoria
+                    # Actualizar memoria local
+                    prenda_objeto["Stock"] = nuevo_stock
                     st.session_state.ventas.append({
-                        "Fecha": fecha_str, "Mes": mes_str, "Año": anio_int, "SKU": sku_generado, 
-                        "Producto": prenda_objeto['Producto'], "Categoría": prenda_objeto['Categoría'], 
-                        "Talla": prenda_objeto['Talla'], "Canal": canal, "Cliente": cliente, 
-                        "Precio": precio, "Costo": costo_real, "Utilidad": utilidad_calculada, "Vendedor": vendedor_actual
+                        "id": nuevo_id, "Fecha": fecha_str, "Mes": mes_str,
+                        "Mes_Nombre": mes_nombre, "Año": anio_int, "SKU": sku_generado,
+                        "Producto": prenda_objeto["Producto"], "Categoría": prenda_objeto["Categoría"],
+                        "Talla": prenda_objeto["Talla"], "Canal": canal, "Cliente": cliente,
+                        "Precio": precio, "Costo": costo_real, "Utilidad": utilidad_calculada,
+                        "Vendedor": vendedor_actual
                     })
-                    
+
                     st.success("✅ Venta registrada con éxito en el historial.")
                     time.sleep(0.5)
                     st.rerun()
 
         st.divider()
+
         if st.session_state.ventas:
             df_ventas = pd.DataFrame(st.session_state.ventas)
-            df_ventas.index = range(1, len(df_ventas) + 1)
+
+            # Mostrar últimas 100 por defecto (FIX menor: paginación simple)
             st.subheader("📋 Historial Completo de Ventas")
-            
-            # Filtro de privacidad de costos para no socios
+            mostrar_todo = st.toggle("Mostrar todas las ventas", value=False)
+            df_display = df_ventas if mostrar_todo else df_ventas.tail(100)
+            df_display = df_display.copy()
+            df_display.index = range(1, len(df_display) + 1)
+
+            # Columnas ocultas para no socios
+            cols_ocultar_no_socio = ["id", "Mes", "Costo", "Utilidad"]
+            cols_ocultar_socio = ["id", "Mes"]
+
             if es_socio:
-                df_mostrar = df_ventas
+                df_mostrar = df_display.drop(columns=cols_ocultar_socio, errors="ignore")
             else:
-                df_mostrar = df_ventas.drop(columns=["Costo", "Utilidad"])
-                
+                df_mostrar = df_display.drop(columns=cols_ocultar_no_socio, errors="ignore")
+
             st.dataframe(df_mostrar, use_container_width=True)
 
             buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_mostrar.to_excel(writer, index=False, sheet_name='Reporte_Ventas')
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                df_mostrar.to_excel(writer, index=False, sheet_name="Reporte_Ventas")
             buffer.seek(0)
 
             st.download_button(
@@ -432,44 +528,52 @@ else:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
+            # ── Anulación de ventas (FIX #1: DELETE por ID real) ────
             st.subheader("🗑 Anular y Devolver a Almacén")
             st.write("Selecciona una transacción para anularla. El producto retornará automáticamente al stock.")
-            
-            lista_opciones_anular = []
-            for i, v in enumerate(st.session_state.ventas):
-                texto_opcion = f"ID:{i} | {v['Fecha']} | {v['SKU']} | Vendedor: {v['Vendedor'].title()} | S/ {v['Precio']}"
-                lista_opciones_anular.append((i, texto_opcion))
-                
-            venta_eliminar_idx = st.selectbox("Transacción a cancelar:", [x[0] for x in lista_opciones_anular], format_func=lambda x: [y[1] for y in lista_opciones_anular if y[0] == x][0])
-            
-            if venta_eliminar_idx is not None:
-                v_sel = st.session_state.ventas[venta_eliminar_idx]
 
-                if es_socio or (st.session_state.usuario_actual == v_sel["Vendedor"]):
+            # FIX #6: Diccionario O(1) en lugar de búsqueda O(n²)
+            mapa_opciones = {
+                v["id"]: f"ID:{v['id']} | {v['Fecha']} | {v['SKU']} | Vendedor: {v['Vendedor'].title()} | S/ {v['Precio']}"
+                for v in st.session_state.ventas
+            }
+
+            if mapa_opciones:
+                id_seleccionado = st.selectbox(
+                    "Transacción a cancelar:",
+                    options=list(mapa_opciones.keys()),
+                    format_func=lambda x: mapa_opciones[x]
+                )
+
+                v_sel = next((v for v in st.session_state.ventas if v["id"] == id_seleccionado), None)
+
+                if v_sel and (es_socio or st.session_state.usuario_actual == v_sel["Vendedor"]):
                     if st.button("⚠️ Confirmar Anulación de Venta"):
                         with sqlite3.connect(DB_NAME, timeout=20) as conn:
                             cursor = conn.cursor()
-                            
-                            # 1. Retornar el stock a la DB
+
+                            # Retornar stock por id de inventario (FIX #7: más robusto)
                             for item in st.session_state.inventario:
                                 if item["Producto"] == v_sel["Producto"] and item["Talla"] == v_sel["Talla"]:
                                     item["Stock"] += 1
-                                    cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], item["Producto"], item["Talla"]))
+                                    cursor.execute(
+                                        "UPDATE inventario SET stock = ? WHERE id = ?",
+                                        (item["Stock"], item["id"])
+                                    )
                                     break
-                                    
-                            # 2. Borrar la venta de la DB
-                            cursor.execute("DELETE FROM ventas WHERE fecha=? AND sku=? AND precio=? AND cliente=? AND vendedor=?", (v_sel['Fecha'], v_sel['SKU'], v_sel['Precio'], v_sel['Cliente'], v_sel['Vendedor']))
+
+                            # FIX #1: DELETE por id único — ya no borra duplicados accidentales
+                            cursor.execute("DELETE FROM ventas WHERE id = ?", (v_sel["id"],))
                             conn.commit()
-                            
-                        # 3. Limpiar memoria
-                        st.session_state.ventas.pop(venta_eliminar_idx)
+
+                        st.session_state.ventas = [v for v in st.session_state.ventas if v["id"] != id_seleccionado]
                         st.success("Venta eliminada y stock devuelto exitosamente.")
                         time.sleep(0.8)
                         st.rerun()
 
-    # =====================================
+    # ================================================================
     # MÓDULO: INVENTARIO
-    # =====================================
+    # ================================================================
     elif menu == "Inventario":
         st.title("📦 Almacén Central e Inventario")
 
@@ -488,23 +592,29 @@ else:
                         existe_producto = False
                         with sqlite3.connect(DB_NAME, timeout=20) as conn:
                             cursor = conn.cursor()
-                            
-                            # Buscar si ya existe la prenda para sumar stock
                             for item in st.session_state.inventario:
                                 if item["Producto"] == prod and item["Talla"] == tll:
                                     item["Stock"] += stk
                                     item["Costo_Base"] = c_base
-                                    cursor.execute("UPDATE inventario SET stock = ?, costo_base = ? WHERE producto = ? AND talla = ?", (item["Stock"], c_base, prod, tll))
+                                    cursor.execute(
+                                        "UPDATE inventario SET stock = ?, costo_base = ? WHERE id = ?",
+                                        (item["Stock"], c_base, item["id"])
+                                    )
                                     existe_producto = True
                                     break
-                                    
-                            # Si no existe, crear registro nuevo
+
                             if not existe_producto:
-                                st.session_state.inventario.append({"Producto": prod, "Categoría": cat, "Talla": tll, "Stock": stk, "Costo_Base": c_base})
-                                cursor.execute("INSERT INTO inventario(producto, categoria, talla, stock, costo_base) VALUES(?,?,?,?,?)", (prod, cat, tll, stk, c_base))
-                                
+                                cursor.execute(
+                                    "INSERT INTO inventario(producto, categoria, talla, stock, costo_base) VALUES(?,?,?,?,?)",
+                                    (prod, cat, tll, stk, c_base)
+                                )
+                                nuevo_id = cursor.lastrowid
+                                st.session_state.inventario.append({
+                                    "id": nuevo_id, "Producto": prod, "Categoría": cat,
+                                    "Talla": tll, "Stock": stk, "Costo_Base": c_base
+                                })
                             conn.commit()
-                            
+
                         st.success("✅ Base de inventario actualizada de forma exitosa.")
                         time.sleep(0.5)
                         st.rerun()
@@ -515,12 +625,12 @@ else:
             df_inv = pd.DataFrame(st.session_state.inventario)
             df_inv.index = range(1, len(df_inv) + 1)
             st.subheader("📋 Estado Actual del Almacén")
-            
-            if es_socio:
-                df_inv_mostrar = df_inv
-            else:
-                df_inv_mostrar = df_inv.drop(columns=["Costo_Base"])
-                
+
+            cols_ocultar_inv = ["id"]
+            if not es_socio:
+                cols_ocultar_inv.append("Costo_Base")
+
+            df_inv_mostrar = df_inv.drop(columns=cols_ocultar_inv, errors="ignore")
             st.dataframe(df_inv_mostrar, use_container_width=True)
 
             st.subheader("⚠ Alertas Automáticas de Reposición (Stock Crítico)")
@@ -531,33 +641,44 @@ else:
             else:
                 st.success("Toda la mercadería se encuentra por encima del margen crítico. Almacén estable.")
 
-    # =====================================
+    # ================================================================
     # MÓDULO: GASTOS
-    # =====================================
+    # ================================================================
     elif menu == "Gastos" and es_socio:
         st.title("💸 Control Central de Gastos y Egresos")
-        
+
         with st.form("form_gastos"):
             f_g = st.date_input("Fecha de Egreso", datetime.now())
             con = st.text_input("Concepto Detallado del Gasto").strip().title()
-            cat = st.selectbox("Clasificación Contable", ["Viaje Gamarra", "Hospedaje", "Comida", "Marketing", "Meta Ads", "Transporte", "Suministros", "Otro"])
+            cat = st.selectbox("Clasificación Contable", [
+                "Viaje Gamarra", "Hospedaje", "Comida", "Marketing",
+                "Meta Ads", "Transporte", "Suministros", "Otro"
+            ])
             resp = st.text_input("Personal Responsable").strip().title()
             mon = st.number_input("Monto Total Facturado (S/)", min_value=0.0, step=1.0)
-            
             btn_gasto = st.form_submit_button("Registrar Egreso")
 
         if btn_gasto:
-            if con != "" and resp != "" and mon > 0:
+            if con and resp and mon > 0:
                 fecha_str = f_g.strftime("%d/%m/%Y")
                 mes_str = f_g.strftime("%m")
+                mes_nombre = MESES[mes_str]
                 anio_int = f_g.year
-                
+
                 with sqlite3.connect(DB_NAME, timeout=20) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("INSERT INTO gastos(fecha, mes, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?)", (fecha_str, mes_str, anio_int, con, cat, resp, mon))
+                    cursor.execute(
+                        "INSERT INTO gastos(fecha, mes, mes_nombre, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?,?)",
+                        (fecha_str, mes_str, mes_nombre, anio_int, con, cat, resp, mon)
+                    )
+                    nuevo_id = cursor.lastrowid
                     conn.commit()
-                    
-                st.session_state.gastos.append({"Fecha": fecha_str, "Mes": mes_str, "Año": anio_int, "Concepto": con, "Categoría": cat, "Responsable": resp, "Monto": mon})
+
+                st.session_state.gastos.append({
+                    "id": nuevo_id, "Fecha": fecha_str, "Mes": mes_str,
+                    "Mes_Nombre": mes_nombre, "Año": anio_int,
+                    "Concepto": con, "Categoría": cat, "Responsable": resp, "Monto": mon
+                })
                 st.success("✅ Gasto procesado y guardado en la base de datos.")
                 time.sleep(0.5)
                 st.rerun()
@@ -565,47 +686,73 @@ else:
                 st.error("⚠️ Por favor completa la descripción, el responsable y asegúrate de que el monto sea mayor a 0.")
 
         st.divider()
+
         if st.session_state.gastos:
             st.subheader("📋 Libro de Egresos")
-            df_gastos = pd.DataFrame(st.session_state.gastos)
-            df_gastos.index = range(1, len(df_gastos) + 1)
-            st.dataframe(df_gastos, use_container_width=True)
 
-    # =====================================
+            # FIX #8: Anulación de gastos
+            df_gastos = pd.DataFrame(st.session_state.gastos)
+            df_gastos_mostrar = df_gastos.drop(columns=["id", "Mes"], errors="ignore")
+            df_gastos_mostrar.index = range(1, len(df_gastos_mostrar) + 1)
+            st.dataframe(df_gastos_mostrar, use_container_width=True)
+
+            st.subheader("🗑 Anular Egreso")
+            mapa_gastos = {
+                g["id"]: f"ID:{g['id']} | {g['Fecha']} | {g['Concepto']} | S/ {g['Monto']}"
+                for g in st.session_state.gastos
+            }
+            id_gasto_sel = st.selectbox(
+                "Selecciona el egreso a anular:",
+                options=list(mapa_gastos.keys()),
+                format_func=lambda x: mapa_gastos[x]
+            )
+            if st.button("⚠️ Confirmar Anulación de Egreso"):
+                with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM gastos WHERE id = ?", (id_gasto_sel,))
+                    conn.commit()
+                st.session_state.gastos = [g for g in st.session_state.gastos if g["id"] != id_gasto_sel]
+                st.success("Egreso eliminado correctamente.")
+                time.sleep(0.5)
+                st.rerun()
+
+    # ================================================================
     # MÓDULO: GESTIONAR USUARIOS
-    # =====================================
+    # ================================================================
     elif menu == "Gestionar Usuarios" and es_socio:
         st.title("👥 Panel Administrativo de Usuarios")
-        
+
         st.subheader("Usuarios con Acceso Activo")
         with sqlite3.connect(DB_NAME, timeout=20) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, usuario FROM usuarios")
             lista_usuarios = cursor.fetchall()
-            
+
         df_usuarios = pd.DataFrame(lista_usuarios, columns=["ID_Sistema", "Nombre_Usuario"])
         df_usuarios.index = range(1, len(df_usuarios) + 1)
         st.dataframe(df_usuarios, use_container_width=True)
-        
-        st.divider()
 
+        st.divider()
         st.subheader("➕ Dar de Alta a Nuevo Personal")
         col_u1, col_u2 = st.columns(2)
         with col_u1:
             nuevo_usuario = st.text_input("Nuevo Nombre de Usuario").strip().lower()
         with col_u2:
             nueva_clave = st.text_input("Asignar Contraseña Temporal", type="password")
-        
+
         if st.button("Registrar Credenciales"):
-            if nuevo_usuario == "" or nueva_clave == "":
+            if not nuevo_usuario or not nueva_clave:
                 st.error("❌ Los campos de usuario y contraseña son de llenado obligatorio.")
             else:
                 try:
                     with sqlite3.connect(DB_NAME, timeout=20) as conn:
                         cursor = conn.cursor()
-                        cursor.execute("INSERT INTO usuarios(usuario, clave) VALUES(?, ?)", (nuevo_usuario, nueva_clave))
+                        # FIX #4: guardar hash en lugar de texto plano
+                        cursor.execute(
+                            "INSERT INTO usuarios(usuario, clave) VALUES(?, ?)",
+                            (nuevo_usuario, hashear_clave(nueva_clave))
+                        )
                         conn.commit()
-                        
                     st.success(f"✅ Nuevo acceso generado para '{nuevo_usuario}'.")
                     time.sleep(0.5)
                     st.rerun()
@@ -613,26 +760,23 @@ else:
                     st.error("❌ El nombre de usuario ingresado ya se encuentra registrado.")
 
         st.divider()
-        
         st.subheader("🗑 Revocación de Accesos")
         usuarios_eliminables = [u for u in lista_usuarios if u[1] not in SOCIOS]
-        
+
         if usuarios_eliminables:
-            usuario_a_borrar = st.selectbox(
+            mapa_usuarios = {u[0]: u[1].title() for u in usuarios_eliminables}
+            id_usuario_borrar = st.selectbox(
                 "Seleccione la cuenta a dar de baja permanentemente:",
-                range(len(usuarios_eliminables)),
-                format_func=lambda x: usuarios_eliminables[x][1].title()
+                options=list(mapa_usuarios.keys()),
+                format_func=lambda x: mapa_usuarios[x]
             )
-            
+
             if st.button("⚠️ Ejecutar Baja de Usuario"):
-                id_borrar = usuarios_eliminables[usuario_a_borrar][0]
-                nom_borrar = usuarios_eliminables[usuario_a_borrar][1]
-                
+                nom_borrar = mapa_usuarios[id_usuario_borrar]
                 with sqlite3.connect(DB_NAME, timeout=20) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("DELETE FROM usuarios WHERE id = ?", (id_borrar,))
+                    cursor.execute("DELETE FROM usuarios WHERE id = ?", (id_usuario_borrar,))
                     conn.commit()
-                    
                 st.success(f"🗑 Las credenciales de '{nom_borrar}' han sido revocadas exitosamente.")
                 time.sleep(0.5)
                 st.rerun()
