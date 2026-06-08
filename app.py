@@ -66,8 +66,8 @@ st.markdown("""
     .stButton>button:hover {
         transform: scale(1.02) !important;
     }
-    </style>
-""", unsafe_allow_allow_html=True)
+   </style>
+""", unsafe_allow_html=True) # <-- Asegúrate de que diga solo una vez "allow"
 
 # Colocamos el logo en la barra lateral con protección contra errores
 try:
@@ -75,8 +75,7 @@ try:
 except Exception:
     st.sidebar.markdown("### 📊 ERP VILLAN")
 
-# LISTA DE SOCIOS
-SOCIOS = ["cesar", "larry", "jahairo"]
+
 # LISTA DE SOCIOS
 SOCIOS = ["cesar", "larry", "jahairo"]
 
