@@ -3,18 +3,22 @@ import pandas as pd
 import io
 import sqlite3
 from datetime import datetime
-import extra_streamlit_components as stx  # Sistema de cookies para recordar sesión
+import extra_streamlit_components as stx  # Sistema de cookies
+import time
 
 # =====================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN (¡SIEMPRE PRIMERO!)
 # =====================================
-
 st.set_page_config(
     page_title="ERP VILLAN",
+    page_icon="logo.png",
     layout="wide"
 )
 
-# LISTA DE SOCIOS (Cualquier otro usuario creado será tratado como Vendedor)
+# Colocamos el logo en la parte superior de la barra lateral de forma nativa
+st.logo("logo.png", size="large")
+
+# LISTA DE SOCIOS
 SOCIOS = ["cesar", "larry", "jahairo"]
 
 # ==========================
