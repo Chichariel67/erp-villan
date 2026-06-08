@@ -16,58 +16,128 @@ st.set_page_config(
 )
 
 # =====================================
-# DISEÑO DE INTERFAZ PREMIUM Y ANIMACIONES (CSS)
+# DISEÑO VISUAL ULTRA-PREMIUM (VILLAN BLACK-EDITION)
 # =====================================
 st.markdown("""
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
     <style>
-    /* 1. Animación de entrada suave para toda la app */
-    .stApp {
-        animation: fadeIn 1.2s ease-in-out;
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+    /* Aplicar tipografía moderna a toda la aplicación */
+    html, body, [data-testid="stAppViewContainer"] {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        background-color: #0b0c10 !important; /* Fondo oscuro cinematográfico */
     }
 
-    /* 2. Efecto de brillo y pulso para el Logo de VILLAN */
+    /* Títulos con estilo Cyber/Urbano */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Space Grotesk', sans-serif !important;
+        letter-spacing: -0.5px !important;
+    }
+
+    /* Animación de carga fluida para toda la app */
+    .stApp {
+        animation: smoothReveal 1s cubic-bezier(0.1, 0.8, 0.2, 1);
+    }
+    @keyframes smoothReveal {
+        from { opacity: 0; filter: blur(5px); transform: scale(0.99); }
+        to { opacity: 1; filter: blur(0); transform: scale(1); }
+    }
+
+    /* DISEÑO DE LA BARRA LATERAL (SIDEBAR) FLOTANTE */
+    [data-testid="stSidebar"] {
+        background-color: #111217 !important;
+        border-right: 1px solid rgba(222, 255, 154, 0.05) !important;
+    }
+    
+    /* El logo con efecto respiración de luz de fondo (Glow) */
     [data-testid="stSidebarHeader"] img {
-        filter: drop-shadow(0px 0px 8px rgba(222, 255, 154, 0.6));
-        animation: pulseLogo 3s infinite ease-in-out;
-        transition: transform 0.3s ease;
+        filter: drop-shadow(0px 4px 10px rgba(222, 255, 154, 0.2));
+        animation: villainGlow 4s infinite ease-in-out;
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     [data-testid="stSidebarHeader"] img:hover {
-        transform: scale(1.05) rotate(2deg);
+        transform: scale(1.08) rotate(-1deg);
     }
-    @keyframes pulseLogo {
-        0%, 100% { filter: drop-shadow(0px 0px 6px rgba(222, 255, 154, 0.4)); }
-        50% { filter: drop-shadow(0px 0px 14px rgba(222, 255, 154, 0.8)); }
+    @keyframes villainGlow {
+        0%, 100% { filter: drop-shadow(0px 0px 8px rgba(222, 255, 154, 0.15)); }
+        50% { filter: drop-shadow(0px 0px 20px rgba(222, 255, 154, 0.5)); }
     }
 
-    /* 3. Tarjetas de métricas interactivas (Efecto Hover moderno) */
+    /* TARJETAS DE MÉTRICAS INTERACTIVAS (GRID PREMIUM) */
     div[data-testid="stMetric"] {
-        background: #151515 !important;
-        border: 1px solid #252525 !important;
-        border-radius: 16px !important;
-        padding: 20px 25px !important;
-        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2) !important;
+        background: linear-gradient(145deg, #16171d, #111216) !important;
+        border: 1px solid rgba(255, 255, 255, 0.04) !important;
+        border-radius: 20px !important;
+        padding: 24px !important;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+        backdrop-filter: blur(4px) !important;
+        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
     }
+    
+    /* Efecto cuando pasas el mouse por encima de las tarjetas */
     div[data-testid="stMetric"]:hover {
-        transform: translateY(-5px) !important;
-        border-color: #deff9a !important; /* Color verde/limón de acento corporativo */
-        box-shadow: 0 12px 20px rgba(222, 255, 154, 0.1) !important;
+        transform: translateY(-8px) scale(1.01) !important;
+        border-color: rgba(222, 255, 154, 0.5) !important; /* Borde verde limón neón */
+        box-shadow: 0 15px 30px rgba(222, 255, 154, 0.08) !important;
+    }
+    
+    /* Estilizar el texto dentro de las métricas */
+    div[data-testid="stMetricLabel"] {
+        font-size: 14px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1.5px !important;
+        color: #8a8f98 !important;
+    }
+    div[data-testid="stMetricValue"] {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 32px !important;
+        font-weight: 700 !important;
+        color: #ffffff !important;
     }
 
-    /* 4. Suavizar transiciones en los botones */
+    /* BOTONES ESTILO NEÓN INTERACTIVO */
     .stButton>button {
-        transition: all 0.2s ease !important;
-        border-radius: 8px !important;
+        background: #16171d !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        padding: 10px 24px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.5px !important;
+        transition: all 0.3s ease !important;
     }
     .stButton>button:hover {
-        transform: scale(1.02) !important;
+        background: #deff9a !important; /* Fondo verde limón en hover */
+        color: #000000 !important; /* Texto negro para contraste */
+        border-color: #deff9a !important;
+        box-shadow: 0 0 15px rgba(222, 255, 154, 0.4) !important;
+        transform: translateY(-2px) !important;
     }
-   </style>
-""", unsafe_allow_html=True) # <-- Asegúrate de que diga solo una vez "allow"
+    .stButton>button:active {
+        transform: translateY(0px) !important;
+    }
+
+    /* PESTAÑAS (TABS) MODERNAS */
+    button[data-testid="stMarkdownContainer"] p {
+        font-weight: 600 !important;
+    }
+    
+    /* CONTENEDOR DE ENTRADAS DE TEXTO (INPUTS) */
+    div[data-testid="stTextInput"] input {
+        background-color: #111217 !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        color: #fff !important;
+        transition: all 0.3s ease !important;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color: #deff9a !important;
+        box-shadow: 0 0 10px rgba(222, 255, 154, 0.2) !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Colocamos el logo en la barra lateral con protección contra errores
 try:
