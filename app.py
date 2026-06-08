@@ -143,7 +143,7 @@ except Exception:
 SOCIOS = ["cesar", "larry", "jahairo"]
 
 # ==========================
-# CONEXIÓN SQLITE (Con protección contra bloqueos)
+# CONEXIÓN SQLITE
 # ==========================
 conn = sqlite3.connect(
     "villan.db",
@@ -152,7 +152,7 @@ conn = sqlite3.connect(
 )
 cursor = conn.cursor()
 
-# Creación de tablas
+# Creación de tablas básicas
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ventas(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,22 +204,24 @@ CREATE TABLE IF NOT EXISTS usuarios(
 """)
 conn.commit()
 
-# PARCHE DE MIGRACIÓN
+# Parche de migración de columna vendedor
 try:
     cursor.execute("ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'")
     conn.commit()
 except sqlite3.OperationalError:
     pass
 
+# Crear socios iniciales si no existen
 for socio in SOCIOS:
     cursor.execute("INSERT OR IGNORE INTO usuarios(usuario, clave) VALUES(?, '1234')", (socio,))
 conn.commit()
 
-# ==========================
-# COOKIES Y LOGIN INTELIGENTE
-# ==========================
+# ===================================================
+# 🔒 COOKIES Y LOGIN INTELIGENTE (TU LOGICA ORIGINAL RECUPERADA)
+# ===================================================
 cookie_manager = stx.CookieManager()
 
+# Forzamos al sistema a esperar de forma segura el token del navegador
 with st.spinner("Verificando sesión..."):
     for _ in range(30):
         cookie_usuario = cookie_manager.get(cookie="villan_user")
@@ -236,6 +238,7 @@ if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
     st.session_state.usuario_actual = cookie_usuario
 
+# Si no está logueado ni tiene cookies válidas, bloquea con contraseña
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -257,7 +260,7 @@ if not st.session_state.logueado:
     st.stop()
 
 # ==========================
-# CARGAR DATOS EN MEMORIA
+# CARGAR DATA EN MEMORIA
 # ==========================
 if "ventas" not in st.session_state:
     cursor.execute("SELECT fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor FROM ventas")
@@ -288,10 +291,10 @@ opciones_menu = ["Dashboard", "Ventas", "Inventario", "Gastos", "Gestionar Usuar
 
 menu = st.sidebar.selectbox("Menú", opciones_menu)
 
-# 🛠️ CORRECCIÓN DEL BOTÓN DE CERRAR SESIÓN (PAUSA DE BORRADO INTEGRADA)
+# Arreglo definitivo del cierre de sesión con purga limpia de cookies
 if st.sidebar.button("❌ Cerrar Sesión"):
     cookie_manager.delete(cookie="villan_user")
-    time.sleep(0.2)  # Le da tiempo al navegador de borrar la cookie por completo
+    time.sleep(0.3)  # Pausa obligatoria para que el navegador ejecute el borrado
     st.session_state.logueado = False
     st.session_state.usuario_actual = ""
     st.session_state.pop("ventas", None)
@@ -300,173 +303,205 @@ if st.sidebar.button("❌ Cerrar Sesión"):
     st.rerun()
 
 # =====================================
-# MODULO: VENTAS (DISEÑO INTERACTIVO)
+# SECCIÓN: VENTAS (CON REFRESH ARREGLADO)
 # =====================================
 if menu == "Ventas":
-    st.title("🛒 Caja de Ventas Rápida")
+    st.title("🛒 Registro de Ventas")
     st.write(f"👤 Atendido por: **{st.session_state.usuario_actual.title()}**")
 
-    # Mostrar catálogo de selección rápida interactiva
-    st.subheader("👕 Paso 1: Selecciona la Prenda a Vender")
-    
     if not st.session_state.inventario:
-        st.info("No hay productos registrados en el inventario actual.")
-        st.stop()
+        st.info("No hay productos en almacén. Registra stock primero.")
+    else:
+        # Metemos el proceso en un FORMULARIO para evitar que la página parpadee al escribir
+        with st.form("formulario_venta_limpio"):
+            opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und" for item in st.session_state.inventario]
+            prenda_seleccionada = st.selectbox("Selecciona el artículo vendido:", opciones_prendas)
+            
+            idx_sel = opciones_prendas.index(prenda_seleccionada)
+            prenda_objeto = st.session_state.inventario[idx_sel]
 
-    # Formateamos los productos en tarjetas para que hagan clic en una
-    opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Stock: {item['Stock']} und" for item in st.session_state.inventario]
-    prenda_seleccionada = st.selectbox("Toca aquí y elige el producto vendido:", opciones_prendas)
-    
-    # Extraer el índice seleccionado
-    idx_sel = opciones_prendas.index(prenda_seleccionada)
-    prenda_objeto = st.session_state.inventario[idx_sel]
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha = st.date_input("Fecha de Venta", datetime.now())
+                canal = st.selectbox("Canal de Venta", ["Tienda Física", "Instagram", "WhatsApp", "TikTok", "Otro"])
+                cliente = st.text_input("Nombre del Cliente", "Cliente General")
+            with col2:
+                precio = st.number_input("Precio de Venta (S/)", min_value=0.0, value=89.90)
+                if es_socio:
+                    costo = st.number_input("Costo de Fábrica (S/)", min_value=0.0, value=40.0)
+                else:
+                    costo = 0.0
 
-    st.markdown(f"""
-        <div class="product-card">
-            <h3 style='color:#deff9a; margin:0;'>Item Seleccionado: {prenda_objeto['Producto']}</h3>
-            <p style='margin:5px 0 0 0; color:#8a8f98;'>Categoría: {prenda_objeto['Categoría']} | Talla: <b>{prenda_objeto['Talla']}</b> | Disponibles: <b>{prenda_objeto['Stock']} und</b></p>
-        </div>
-    """, unsafe_allow_html=True)
+            # El botón de guardar dentro del formulario procesa de golpe, SIN REFRESH PREVIO
+            enviar_venta = st.form_submit_button("🚀 Procesar y Guardar Venta")
 
-    st.subheader("📝 Paso 2: Detalles del Cliente y Pago")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        fecha = st.date_input("Fecha de Venta", datetime.now())
-        canal = st.selectbox("Canal de Venta", ["Tienda Física", "Instagram", "WhatsApp", "TikTok", "Otro"])
-    with col2:
-        cliente = st.text_input("Nombre del Cliente", "Cliente General").strip().title()
-        precio = st.number_input("Precio Cobrado (S/)", min_value=0.0, value=89.90)
-    with col3:
-        if es_socio:
-            costo = st.number_input("Costo Real de Fábrica (S/)", min_value=0.0, value=40.0)
-        else:
-            costo = 0.0
+        if enviar_venta:
+            if prenda_objeto["Stock"] <= 0:
+                st.error("❌ Operación abortada: Este producto no cuenta con stock físico en almacén.")
+            else:
+                prenda_objeto["Stock"] -= 1
+                cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (prenda_objeto["Stock"], prenda_objeto["Producto"], prenda_objeto["Talla"]))
+                
+                utilidad = precio - costo
+                sku_generado = f"{prenda_objeto['Producto']} {prenda_objeto['Talla']}"
+                vendedor_actual = st.session_state.usuario_actual
 
-    if st.button("🚀 Registrar y Procesar Venta"):
-        if prenda_objeto["Stock"] <= 0:
-            st.error(f"❌ ¡Operación Cancelada! No queda stock de este producto.")
-            st.stop()
+                cursor.execute("""
+                    INSERT INTO ventas(fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (fecha.strftime("%d/%m/%Y"), fecha.strftime("%m"), fecha.year, sku_generado, prenda_objeto['Producto'], prenda_objeto['Categoría'], prenda_objeto['Talla'], canal, cliente, precio, costo, utilidad, vendedor_actual))
+                conn.commit()
 
-        # Descontar stock
-        prenda_objeto["Stock"] -= 1
-        cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (prenda_objeto["Stock"], prenda_objeto["Producto"], prenda_objeto["Talla"]))
-        
-        utilidad = precio - costo
-        sku_generado = f"{prenda_objeto['Producto']} {prenda_objeto['Talla']}"
-        vendedor_actual = st.session_state.usuario_actual
-
-        cursor.execute("""
-            INSERT INTO ventas(fecha, mes, anio, sku, producto, categoria, talla, canal, cliente, precio, costo, utilidad, vendedor)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (fecha.strftime("%d/%m/%Y"), fecha.strftime("%m"), fecha.year, sku_generado, prenda_objeto['Producto'], prenda_objeto['Categoría'], prenda_objeto['Talla'], canal, cliente, precio, costo, utilidad, vendedor_actual))
-        conn.commit()
-
-        st.session_state.ventas.append({
-            "Fecha": fecha.strftime("%d/%m/%Y"), "Mes": fecha.strftime("%m"), "Año": fecha.year, "SKU": sku_generado, "Producto": prenda_objeto['Producto'], "Categoría": prenda_objeto['Categoría'], "Talla": prenda_objeto['Talla'], "Canal": canal, "Cliente": cliente, "Precio": precio, "Costo": costo, "Utilidad": utilidad, "Vendedor": vendedor_actual
-        })
-        st.success("✅ ¡Venta Guardada con éxito!")
-        st.rerun()
+                st.session_state.ventas.append({
+                    "Fecha": fecha.strftime("%d/%m/%Y"), "Mes": fecha.strftime("%m"), "Año": fecha.year, "SKU": sku_generado, "Producto": prenda_objeto['Producto'], "Categoría": prenda_objeto['Categoría'], "Talla": prenda_objeto['Talla'], "Canal": canal, "Cliente": cliente, "Precio": precio, "Costo": costo, "Utilidad": utilidad, "Vendedor": seller_actual if 'seller_actual' in locals() else vendedor_actual
+                })
+                st.success("✅ Venta añadida al historial.")
+                st.rerun()
 
     st.divider()
     if st.session_state.ventas:
         df_ventas = pd.DataFrame(st.session_state.ventas)
-        st.subheader("📋 Historial de Turno")
+        df_ventas.index = range(1, len(df_ventas) + 1)
+        st.subheader("📋 Ventas del Historial")
         st.dataframe(df_ventas if es_socio else df_ventas.drop(columns=["Costo", "Utilidad"]), use_container_width=True)
 
-# =====================================
-# MODULO: INVENTARIO (CON SEMÁFORO VISUAL)
-# =====================================
-elif menu == "Inventario":
-    st.title("📦 Panel de Control de Inventario")
+        st.subheader("🗑 Eliminar una Venta")
+        venta_eliminar = st.selectbox("Selecciona la transacción:", range(len(st.session_state.ventas)), format_func=lambda x: f"{st.session_state.ventas[x]['SKU']} | {st.session_state.ventas[x]['Vendedor'].title()} | S/ {st.session_state.ventas[x]['Precio']}")
+        v_sel = st.session_state.ventas[venta_eliminar]
 
-    if es_socio:
-        with st.expander("➕ Abrir Formulario para Registrar Nueva Mercadería o Tallas"):
-            producto_input = st.text_input("Nombre de la Prenda (Ej: Casaca Bomber)")
-            producto = producto_input.strip().title()
-            categoria = st.selectbox("Categoría de Ropa", ["Pantalón", "Polo", "Polera", "Casaca", "Short", "Otro"])
-            talla = st.selectbox("Talla de Fabricación", ["XS", "S", "M", "L", "XL", "XXL"])
-            stock = st.number_input("Cantidad de Unidades que Entran", min_value=1, step=1, value=12)
-
-            if st.button("📥 Almacenar en Base de Datos"):
-                if not producto:
-                    st.error("Ingresa un nombre de producto válido")
-                    st.stop()
-                
-                existe = False
+        if es_socio or (st.session_state.usuario_actual == v_sel["Vendedor"]):
+            if st.button("Confirmar Eliminación"):
                 for item in st.session_state.inventario:
-                    if item["Producto"] == producto and item["Talla"] == talla:
-                        item["Stock"] += stock
-                        cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], producto, talla))
-                        existe = True
+                    if item["Producto"] == v_sel["Producto"] and item["Talla"] == v_sel["Talla"]:
+                        item["Stock"] += 1
+                        cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], item["Producto"], item["Talla"]))
                         break
-
-                if not existe:
-                    st.session_state.inventario.append({"Producto": producto, "Categoría": categoria, "Talla": talla, "Stock": stock})
-                    cursor.execute("INSERT INTO inventario(producto, categoria, talla, stock) VALUES(?,?,?,?)", (producto, categoria, talla, stock))
-                
+                cursor.execute("DELETE FROM ventas WHERE fecha=? AND sku=? AND precio=? AND cliente=? AND vendedor=?", (v_sel['Fecha'], v_sel['SKU'], v_sel['Precio'], v_sel['Cliente'], v_sel['Vendedor']))
                 conn.commit()
-                st.success("✅ Inventario Actualizado")
+                st.session_state.ventas.pop(venta_eliminar)
+                st.success("Venta removida y stock devuelto.")
                 st.rerun()
 
-    # MÓDULO SEMÁFORO: Interfaz Funcional de Alertas
-    st.subheader("🚨 Alertas de Reposición Urgente")
-    df_inv = pd.DataFrame(st.session_state.inventario)
-    
-    if not df_inv.empty:
-        criticos = df_inv[df_inv["Stock"] <= 3]
-        if not criticos.empty:
-            for _, item in criticos.iterrows():
-                st.error(f"🔴 **CRÍTICO:** Quedan solo **{item['Stock']}** unidades de **{item['Producto']}** (Talla {item['Talla']}). ¡Toca ir a Gamarra!")
-        else:
-            st.success("🟢 Todo correcto. Todos tus artículos tienen stock saludable.")
-        
-        st.subheader("📋 Lista Completa de Almacén")
+# =====================================
+# SECCIÓN: INVENTARIO
+# =====================================
+elif menu == "Inventario":
+    st.title("📦 Almacén e Inventario VILLAN")
+
+    if es_socio:
+        with st.expander("➕ Formulario para agregar stock"):
+            p_in = st.text_input("Nombre de la Prenda")
+            prod = p_in.strip().title()
+            cat = st.selectbox("Categoría", ["Pantalón", "Polo", "Polera", "Casaca", "Short", "Otro"])
+            tll = st.selectbox("Talla", ["XS", "S", "M", "L", "XL", "XXL"])
+            stk = st.number_input("Unidades entrantes", min_value=1, step=1)
+
+            if st.button("Guardar en Almacén"):
+                if prod:
+                    ex = False
+                    for item in st.session_state.inventario:
+                        if item["Producto"] == prod and item["Talla"] == tll:
+                            item["Stock"] += stk
+                            cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (item["Stock"], prod, tll))
+                            ex = True
+                            break
+                    if not ex:
+                        st.session_state.inventario.append({"Producto": prod, "Categoría": cat, "Talla": tll, "Stock": stk})
+                        cursor.execute("INSERT INTO inventario(producto, categoria, talla, stock) VALUES(?,?,?,?)", (prod, cat, tll, stk))
+                    conn.commit()
+                    st.success("Inventario actualizado.")
+                    st.rerun()
+
+    if st.session_state.inventario:
+        df_inv = pd.DataFrame(st.session_state.inventario)
+        st.subheader("📋 Stock Físico Disponible")
         st.dataframe(df_inv, use_container_width=True)
 
+        st.subheader("⚠ Alertas de Stock Crítico (3 o menos)")
+        bajo = df_inv[df_inv["Stock"] <= 3]
+        if not bajo.empty:
+            st.dataframe(bajo, use_container_width=True)
+        else:
+            st.success("Todo en orden, stock óptimo.")
+
 # =====================================
-# GASTOS
+# SECCIÓN: GASTOS (SOCIOS)
 # =====================================
 elif menu == "Gastos" and es_socio:
-    st.title("💸 Registro de Gastos")
-    fecha = st.date_input("Fecha del Gasto", datetime.now())
-    concepto = st.text_input("Concepto").strip().title()
-    categoria = st.selectbox("Categoría", ["Viaje Gamarra", "Hospedaje", "Comida", "Marketing", "Meta Ads", "Transporte", "Otro"])
-    responsable = st.text_input("Responsable").strip().title()
-    monto = st.number_input("Monto", min_value=0.0)
+    st.title("💸 Control de Gastos")
+    f_g = st.date_input("Fecha", datetime.now())
+    con = st.text_input("Concepto").strip().title()
+    cat = st.selectbox("Categoría", ["Viaje Gamarra", "Hospedaje", "Comida", "Marketing", "Meta Ads", "Transporte", "Otro"])
+    resp = st.text_input("Responsable").strip().title()
+    mon = st.number_input("Monto (S/)", min_value=0.0)
 
-    if st.button("Guardar Gasto"):
-        cursor.execute("INSERT INTO gastos(fecha, mes, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?)", (fecha.strftime("%d/%m/%Y"), fecha.strftime("%m"), fecha.year, concepto, categoria, responsable, monto))
+    if st.button("Registrar Gasto"):
+        cursor.execute("INSERT INTO gastos(fecha, mes, anio, concepto, categoria, responsable, monto) VALUES(?,?,?,?,?,?,?)", (f_g.strftime("%d/%m/%Y"), f_g.strftime("%m"), f_g.year, con, cat, resp, mon))
         conn.commit()
-        st.session_state.gastos.append({"Fecha": fecha.strftime("%d/%m/%Y"), "Mes": fecha.strftime("%m"), "Año": fecha.year, "Concepto": concepto, "Categoría": categoria, "Responsable": responsable, "Monto": monto})
-        st.success("Gasto registrado")
+        st.session_state.gastos.append({"Fecha": f_g.strftime("%d/%m/%Y"), "Mes": f_g.strftime("%m"), "Año": f_g.year, "Concepto": con, "Categoría": cat, "Responsable": resp, "Monto": mon})
+        st.success("Gasto guardado.")
         st.rerun()
 
     if st.session_state.gastos:
         st.dataframe(pd.DataFrame(st.session_state.gastos), use_container_width=True)
 
-# =====================================
-# GESTIONAR USUARIOS
-# =====================================
+# ===================================================
+# 👥 SECCIÓN: GESTIONAR USUARIOS (REPARADA AL 100%)
+# ===================================================
 elif menu == "Gestionar Usuarios" and es_socio:
-    st.title("👥 Control de Usuarios")
+    st.title("👥 Panel de Control de Personal")
+    
+    st.subheader("➕ Registrar Nuevo Empleado o Socio")
     nuevo_usuario = st.text_input("Nombre de Usuario").strip().lower()
-    nueva_clave = st.text_input("Contraseña", type="password")
+    nueva_clave = st.text_input("Contraseña para el usuario", type="password")
     
     if st.button("Crear Usuario"):
-        if nuevo_usuario and nueva_clave:
+        if not nuevo_usuario or not nueva_clave:
+            st.error("❌ Ambos campos son obligatorios.")
+        else:
             try:
                 cursor.execute("INSERT INTO usuarios(usuario, clave) VALUES(?, ?)", (nuevo_usuario, nueva_clave))
                 conn.commit()
-                st.success("Usuario creado")
+                st.success(f"✅ Usuario '{nuevo_usuario}' creado con éxito.")
                 st.rerun()
             except sqlite3.IntegrityError:
-                st.error("El usuario ya existe")
+                st.error("❌ Ese nombre de usuario ya existe. Elige otro.")
+
+    st.divider()
+    
+    # 🚨 AQUÍ ESTÁ TU TABLA DEVUELTA: Te muestra exactamente quiénes están inscritos
+    st.subheader("📋 Usuarios Registrados con Acceso al Sistema")
+    cursor.execute("SELECT id, usuario FROM usuarios")
+    lista_usuarios = cursor.fetchall()
+    df_usuarios = pd.DataFrame(lista_usuarios, columns=["ID_Sistema", "Nombre_Usuario"])
+    st.dataframe(df_usuarios, use_container_width=True)
+    
+    st.subheader("🗑 Dar de Baja / Eliminar Acceso")
+    usuarios_eliminables = [u for u in lista_usuarios if u[1] not in SOCIOS]
+    
+    if usuarios_eliminables:
+        usuario_a_borrar = st.selectbox(
+            "Selecciona el usuario a eliminar",
+            range(len(usuarios_eliminables)),
+            format_func=lambda x: usuarios_eliminables[x][1].title()
+        )
+        
+        if st.button("Eliminar Usuario Permanentemente"):
+            id_borrar = usuarios_eliminables[usuario_a_borrar][0]
+            nom_borrar = usuarios_eliminables[usuario_a_borrar][1]
+            
+            cursor.execute("DELETE FROM usuarios WHERE id = ?", (id_borrar,))
+            conn.commit()
+            st.success(f"🗑 El acceso para '{nom_borrar}' ha sido revocado.")
+            st.rerun()
+    else:
+        st.info("No hay usuarios asignados como vendedores adicionales para eliminar.")
 
 # =====================================
-# DASHBOARD
+# SECCIÓN: DASHBOARD
 # =====================================
 elif menu == "Dashboard" and es_socio:
-    st.title("📊 Panel General Financiero")
+    st.title("📊 Balance y Rendimiento General")
     st.write(f"👋 ¡Bienvenido Socio, **{st.session_state.usuario_actual.title()}**!")
 
     total_ventas = sum(x["Precio"] for x in st.session_state.ventas)
@@ -476,14 +511,14 @@ elif menu == "Dashboard" and es_socio:
     margen = (utilidad / total_ventas * 100) if total_ventas > 0 else 0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Ventas Total", f"S/ {total_ventas:,.2f}")
-    c2.metric("Costos Mat.", f"S/ {total_costos:,.2f}")
-    c3.metric("Gastos Op.", f"S/ {total_gastos:,.2f}")
-    c4.metric("Utilidad Neta", f"S/ {utilidad:,.2f}")
+    c1.metric("Ventas", f"S/ {total_ventas:,.2f}")
+    c2.metric("Costos", f"S/ {total_costos:,.2f}")
+    c3.metric("Gastos", f"S/ {total_gastos:,.2f}")
+    c4.metric("Utilidad", f"S/ {utilidad:,.2f}")
     c5.metric("Margen %", f"{margen:.2f}%")
 
     st.divider()
     if st.session_state.ventas:
         df_ventas = pd.DataFrame(st.session_state.ventas)
-        st.subheader("🏆 Productos Más Vendidos")
+        st.subheader("🏆 Prendas Líderes en Venta")
         st.bar_chart(df_ventas["SKU"].value_counts())
