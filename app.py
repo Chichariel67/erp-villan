@@ -170,20 +170,28 @@ for socio in SOCIOS:
 conn.commit()
 
 # ===================================================
-# 🔒 COOKIES Y LOGIN ESTABLE
+# 🔒 GESTIÓN DE COOKIES INTEGRAL (SIN REBOOT AL ACTUALIZAR)
 # ===================================================
-cookie_manager = stx.CookieManager()
-cookie_usuario = cookie_manager.get(cookie="villan_user")
+@st.cache_resource
+def obtener_gestor_cookies():
+    return stx.CookieManager()
 
+cookie_manager = obtener_gestor_cookies()
+
+# Inicializar estados de sesión si no existen
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
 
+# Lectura directa del navegador para recuperar la sesión al actualizar (F5)
+cookie_usuario = cookie_manager.get(cookie="villan_user")
+
 if cookie_usuario and not st.session_state.logueado:
     st.session_state.logueado = True
-    st.session_state.usuario_actual = cookie_usuario
+    st.session_state.usuario_actual = cookie_usuario.lower()
 
+# Pantalla de Login (Solo si la cookie y el session_state están completamente vacíos)
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
     usuario_input = st.text_input("Usuario")
@@ -197,6 +205,7 @@ if not st.session_state.logueado:
         if resultado:
             st.session_state.logueado = True
             st.session_state.usuario_actual = resultado[0].lower()
+            # Guardamos la cookie por 30 días para evitar que se borre al cerrar la pestaña
             cookie_manager.set(cookie="villan_user", val=resultado[0].lower(), max_age=2592000)
             st.success("Acceso correcto")
             st.rerun()
@@ -268,7 +277,7 @@ if menu == "Dashboard" and es_socio:
         st.bar_chart(df_ventas["SKU"].value_counts())
 
 # =====================================
-# SECCIÓN: VENTAS (CON DESCARGA DE EXCEL RESTAURADA)
+# SECCIÓN: VENTAS
 # =====================================
 elif menu == "Ventas":
     st.title("🛒 Registro de Ventas")
@@ -327,11 +336,9 @@ elif menu == "Ventas":
         df_ventas.index = range(1, len(df_ventas) + 1)
         st.subheader("📋 Historial Reciente de Ventas")
         
-        # Mostrar la tabla filtrada según el rol del usuario
         df_mostrar = df_ventas if es_socio else df_ventas.drop(columns=["Costo", "Utilidad"])
         st.dataframe(df_mostrar, use_container_width=True)
 
-        # 🚨 ¡BOTÓN DE EXCEL DEVUELTO E INTERACTIVO!
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_mostrar.to_excel(writer, index=False, sheet_name='Reporte_Ventas')
@@ -427,9 +434,9 @@ elif menu == "Gastos" and es_socio:
         df_gastos.index = range(1, len(df_gastos) + 1)
         st.dataframe(df_gastos, use_container_width=True)
 
-# ===================================================
+# =====================================
 # 👥 SECCIÓN: GESTIONAR USUARIOS
-# ===================================================
+# =====================================
 elif menu == "Gestionar Usuarios" and es_socio:
     st.title("👥 Panel de Control de Personal")
     
