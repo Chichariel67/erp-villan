@@ -76,7 +76,7 @@ st.markdown("""
     }
 
     /* BOTONES ESTILO NEÓN INTERACTIVO */
-    .stButton>button {
+    .stButton>button, .stDownloadButton>button {
         background: #16171d !important;
         color: #ffffff !important;
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -84,8 +84,9 @@ st.markdown("""
         padding: 10px 24px !important;
         font-weight: 600 !important;
         letter-spacing: 0.5px !important;
+        width: 100%;
     }
-    .stButton>button:hover {
+    .stButton>button:hover, .stDownloadButton>button:hover {
         background: #deff9a !important; /* Fondo verde limón en hover */
         color: #000000 !important; /* Texto negro para contraste */
         border-color: #deff9a !important;
@@ -158,7 +159,6 @@ CREATE TABLE IF NOT EXISTS usuarios(
 """)
 conn.commit()
 
-# Parche automático para asegurar columna vendedor
 try:
     cursor.execute("ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'")
     conn.commit()
@@ -170,9 +170,8 @@ for socio in SOCIOS:
 conn.commit()
 
 # ===================================================
-# 🔒 COOKIES Y LOGIN ESTABLE (SOLUCIÓN AL CONGELAMIENTO)
+# 🔒 COOKIES Y LOGIN ESTABLE
 # ===================================================
-# Renderizamos el componente al inicio para que el navegador le entregue las cookies sin trabarse
 cookie_manager = stx.CookieManager()
 cookie_usuario = cookie_manager.get(cookie="villan_user")
 
@@ -269,7 +268,7 @@ if menu == "Dashboard" and es_socio:
         st.bar_chart(df_ventas["SKU"].value_counts())
 
 # =====================================
-# SECCIÓN: VENTAS (SELECCION AUTOMÁTICA DESDE ALMACÉN)
+# SECCIÓN: VENTAS (CON DESCARGA DE EXCEL RESTAURADA)
 # =====================================
 elif menu == "Ventas":
     st.title("🛒 Registro de Ventas")
@@ -278,7 +277,6 @@ elif menu == "Ventas":
     if not st.session_state.inventario:
         st.info("No hay productos disponibles en el almacén. Por favor, registra stock en la pestaña de Inventario.")
     else:
-        # Formulario encapsulado para que NO actualice la página sola al escribir textos
         with st.form("formulario_ventas_villan"):
             opciones_prendas = [f"{item['Producto']} (Talla {item['Talla']}) - Disponibles: {item['Stock']} und" for item in st.session_state.inventario]
             prenda_seleccionada = st.selectbox("Selecciona el artículo vendido desde el Almacén:", opciones_prendas)
@@ -304,7 +302,6 @@ elif menu == "Ventas":
             if prenda_objeto["Stock"] <= 0:
                 st.error("❌ Error: No se puede vender este artículo porque no queda stock disponible en almacén.")
             else:
-                # Descontar stock localmente en memoria y en la base de datos
                 prenda_objeto["Stock"] -= 1
                 cursor.execute("UPDATE inventario SET stock = ? WHERE producto = ? AND talla = ?", (prenda_objeto["Stock"], prenda_objeto["Producto"], prenda_objeto["Talla"]))
                 
@@ -329,13 +326,28 @@ elif menu == "Ventas":
         df_ventas = pd.DataFrame(st.session_state.ventas)
         df_ventas.index = range(1, len(df_ventas) + 1)
         st.subheader("📋 Historial Reciente de Ventas")
-        st.dataframe(df_ventas if es_socio else df_ventas.drop(columns=["Costo", "Utilidad"]), use_container_width=True)
+        
+        # Mostrar la tabla filtrada según el rol del usuario
+        df_mostrar = df_ventas if es_socio else df_ventas.drop(columns=["Costo", "Utilidad"])
+        st.dataframe(df_mostrar, use_container_width=True)
+
+        # 🚨 ¡BOTÓN DE EXCEL DEVUELTO E INTERACTIVO!
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_mostrar.to_excel(writer, index=False, sheet_name='Reporte_Ventas')
+        buffer.seek(0)
+
+        st.download_button(
+            label="📥 Descargar Extracto de Ventas en Excel",
+            data=buffer,
+            file_name=f"Ventas_Villan_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
         st.subheader("🗑 Eliminar una Transacción")
         venta_eliminar = st.selectbox("Selecciona la transacción a cancelar:", range(len(st.session_state.ventas)), format_func=lambda x: f"{st.session_state.ventas[x]['SKU']} | {st.session_state.ventas[x]['Vendedor'].title()} | S/ {st.session_state.ventas[x]['Precio']}")
         v_sel = st.session_state.ventas[venta_eliminar]
 
-        # Validación cruzada: Si es socio o dueño de la venta, puede borrar y regresar al almacén
         if es_socio or (st.session_state.usuario_actual == v_sel["Vendedor"]):
             if st.button("Confirmar y Devolver a Stock"):
                 for item in st.session_state.inventario:
@@ -350,7 +362,7 @@ elif menu == "Ventas":
                 st.rerun()
 
 # =====================================
-# SECCIÓN: INVENTARIO (CON ALERTAS CRÍTICAS)
+# SECCIÓN: INVENTARIO
 # =====================================
 elif menu == "Inventario":
     st.title("📦 Almacén e Inventario VILLAN")
@@ -416,12 +428,11 @@ elif menu == "Gastos" and es_socio:
         st.dataframe(df_gastos, use_container_width=True)
 
 # ===================================================
-# 👥 SECCIÓN: GESTIONAR USUARIOS (REPARADA SIN VACÍOS)
+# 👥 SECCIÓN: GESTIONAR USUARIOS
 # ===================================================
 elif menu == "Gestionar Usuarios" and es_socio:
     st.title("👥 Panel de Control de Personal")
     
-    # Renderizar la tabla justo debajo del título para limpiar el espacio negro en blanco
     st.subheader("📋 Usuarios Registrados con Acceso al Sistema")
     cursor.execute("SELECT id, usuario FROM usuarios")
     lista_usuarios = cursor.fetchall()
