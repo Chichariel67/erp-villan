@@ -74,8 +74,6 @@ st.markdown("""
         color: #1e1f22 !important;
         border-color: #deff9a !important;
     }
-    /* Tablas de datos editables en Finanzas */
-    .fin-tabla { border-radius: 12px; overflow: hidden; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -113,13 +111,12 @@ def hashear_clave(clave: str) -> str:
     return hashlib.sha256(clave.encode()).hexdigest()
 
 # =====================================================================
-# 4. BASE DE DATOS — INICIALIZACIÓN Y TABLAS NUEVAS
+# 4. BASE DE DATOS
 # =====================================================================
 def inicializar_base_datos():
     with sqlite3.connect(DB_NAME, timeout=20) as conn:
         c = conn.cursor()
 
-        # ── Tablas existentes ────────────────────────────────────────
         c.execute("""CREATE TABLE IF NOT EXISTS ventas(
             id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, mes TEXT,
             mes_nombre TEXT, anio INTEGER, sku TEXT, producto TEXT,
@@ -138,29 +135,18 @@ def inicializar_base_datos():
         c.execute("""CREATE TABLE IF NOT EXISTS usuarios(
             id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE, clave TEXT)""")
 
-        # ── NUEVA: Flujo de Caja mensual editable ───────────────────
-        # Cada fila = concepto × mes × año con monto ingresado por socio
         c.execute("""CREATE TABLE IF NOT EXISTS flujo_caja(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            anio INTEGER,
-            mes_nombre TEXT,
-            seccion TEXT,
-            concepto TEXT,
+            anio INTEGER, mes_nombre TEXT, seccion TEXT, concepto TEXT,
             monto REAL DEFAULT 0.0,
             UNIQUE(anio, mes_nombre, concepto))""")
 
-        # ── NUEVA: Costo de producción por prenda/talla ──────────────
-        # Cada fila = prenda × talla × componente con costo unitario
         c.execute("""CREATE TABLE IF NOT EXISTS costo_produccion(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prenda TEXT,
-            talla TEXT,
-            componente TEXT,
-            costo REAL DEFAULT 0.0,
-            precio_venta REAL DEFAULT 0.0,
+            prenda TEXT, talla TEXT, componente TEXT,
+            costo REAL DEFAULT 0.0, precio_venta REAL DEFAULT 0.0,
             UNIQUE(prenda, talla, componente))""")
 
-        # ── Migraciones defensivas ───────────────────────────────────
         for sql in [
             "ALTER TABLE ventas ADD COLUMN vendedor TEXT DEFAULT 'admin'",
             "ALTER TABLE ventas ADD COLUMN mes_nombre TEXT DEFAULT ''",
@@ -170,7 +156,6 @@ def inicializar_base_datos():
             try: c.execute(sql)
             except sqlite3.OperationalError: pass
 
-        # ── Migración contraseñas planas → hash ─────────────────────
         c.execute("SELECT id, clave FROM usuarios")
         for uid, clave in c.fetchall():
             if len(clave) != 64:
@@ -185,7 +170,7 @@ def inicializar_base_datos():
 inicializar_base_datos()
 
 # =====================================================================
-# 5. HELPERS DE BASE DE DATOS — FINANZAS
+# 5. HELPERS DE BASE DE DATOS
 # =====================================================================
 def guardar_flujo(anio, mes_nombre, seccion, concepto, monto):
     with sqlite3.connect(DB_NAME, timeout=20) as conn:
@@ -200,7 +185,6 @@ def cargar_flujo(anio):
         rows = conn.execute(
             "SELECT mes_nombre,seccion,concepto,monto FROM flujo_caja WHERE anio=?", (anio,)
         ).fetchall()
-    # Devuelve dict: {(mes, concepto): monto}
     return {(r[0], r[2]): r[3] for r in rows}
 
 def guardar_costo_prod(prenda, talla, componente, costo, precio_venta):
@@ -216,11 +200,10 @@ def cargar_costos_prod():
         rows = conn.execute(
             "SELECT prenda,talla,componente,costo,precio_venta FROM costo_produccion"
         ).fetchall()
-    # {(prenda, talla, componente): (costo, precio_venta)}
     return {(r[0],r[1],r[2]): (r[3],r[4]) for r in rows}
 
 # =====================================================================
-# 6. CARGA DE DATOS GENERALES EN MEMORIA
+# 6. CARGA DE DATOS
 # =====================================================================
 def cargar_ventas_db():
     with sqlite3.connect(DB_NAME, timeout=20) as conn:
@@ -275,16 +258,12 @@ def modulo_flujo_caja():
                                      datetime.now().year + 1], key="fc_anio")
     datos_db = cargar_flujo(anio_sel)
 
-    # ── Formulario de edición por sección ────────────────────────────
-    todos_los_cambios = {}  # {(mes, seccion, concepto): monto}
-
     SECCION_LABELS = {
         "ingresos":  ("📥 INGRESOS",           "#1B5E20"),
         "costos":    ("🏭 COSTOS PRODUCCIÓN",   "#BF360C"),
         "gastos_op": ("💸 GASTOS OPERATIVOS",   "#1A237E"),
     }
 
-    # Acumular totales por mes para calcular utilidad
     totales_mes = {m: {"ingresos":0.0,"costos":0.0,"gastos_op":0.0} for m in MESES_ORD}
 
     with st.form("form_flujo_caja"):
@@ -293,12 +272,12 @@ def modulo_flujo_caja():
                         unsafe_allow_html=True)
 
             conceptos = CATS_FLUJO[seccion]
-            # Construir tabla: filas=conceptos, columnas=meses
             cols_header = st.columns([2] + [1]*12)
             cols_header[0].markdown("**Concepto**")
             for i, m in enumerate(MESES_ORD):
                 cols_header[i+1].markdown(f"**{m[:3]}**")
 
+            todos_los_cambios = {}
             for concepto in conceptos:
                 cols_row = st.columns([2] + [1]*12)
                 cols_row[0].markdown(concepto)
@@ -323,9 +302,8 @@ def modulo_flujo_caja():
         time.sleep(0.4)
         st.rerun()
 
-    # ── Tabla resumen de resultados ───────────────────────────────────
+    # ── Tabla resumen
     st.subheader("📊 Resumen Anual")
-
     filas_resumen = []
     for mes in MESES_ORD:
         t = totales_mes[mes]
@@ -342,8 +320,6 @@ def modulo_flujo_caja():
         })
 
     df_res = pd.DataFrame(filas_resumen)
-
-    # Fila de totales anuales
     total_row = {
         "Mes": "TOTAL AÑO",
         "Ingresos":    df_res["Ingresos"].sum(),
@@ -356,33 +332,21 @@ def modulo_flujo_caja():
     }
     df_res = pd.concat([df_res, pd.DataFrame([total_row])], ignore_index=True)
 
-    # Formato de moneda
     fmt_cols = ["Ingresos","Costos Prod.","Gastos Op.","Util. Bruta","Util. Neta"]
-    def estilo_utilidad(val):
-        if isinstance(val, (int, float)):
-            if val > 0: return "color:#69DB7C;font-weight:bold"
-            elif val < 0: return "color:#FF5252;font-weight:bold"
-        return ""
-    
-    styled = df_res.style\
-        .format({c: "S/ {:,.2f}" for c in fmt_cols})\
-        .format({"Margen %": "{:.1f}%"})\
-        .map(estilo_utilidad, subset=["Util. Neta"])
+    styled = df_res.style.format({c: "S/ {:,.2f}" for c in fmt_cols}).format({"Margen %": "{:.1f}%"})
     st.dataframe(styled, use_container_width=True, height=460)
 
-    # ── Dividendos por socio ─────────────────────────────────────────
+    # ── Dividendos
     utilidad_total_anual = df_res.loc[df_res["Mes"]=="TOTAL AÑO","Util. Neta"].values[0]
     st.subheader("🤝 Dividendos por Socio")
     d1, d2, d3 = st.columns(3)
     for col, nombre in zip([d1,d2,d3], ["Cesar","Larry","Jahairo"]):
         col.metric(f"💰 {nombre}", f"S/ {utilidad_total_anual/3:,.2f}")
 
-    # ── Gráfico de utilidad neta mensual ─────────────────────────────
     st.subheader("📈 Utilidad Neta por Mes")
     df_chart = df_res[df_res["Mes"] != "TOTAL AÑO"][["Mes","Util. Neta"]].set_index("Mes")
     st.bar_chart(df_chart)
 
-    # ── Exportar a Excel ─────────────────────────────────────────────
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df_res.to_excel(writer, index=False, sheet_name=f"Flujo_Caja_{anio_sel}")
@@ -400,7 +364,6 @@ def modulo_costo_produccion():
     st.caption("Ingresa el costo de cada componente por prenda y talla. El margen se calcula automáticamente.")
 
     datos_db = cargar_costos_prod()
-
     tabs = st.tabs([f"👕 {p}" for p in PRENDAS])
 
     for tab, prenda in zip(tabs, PRENDAS):
@@ -408,7 +371,6 @@ def modulo_costo_produccion():
             st.markdown(f"#### {prenda} — Costos unitarios por talla (S/)")
 
             with st.form(f"form_costo_{prenda}"):
-                # Cabecera
                 cols_h = st.columns([1.2] + [1]*len(TALLAS))
                 cols_h[0].markdown("**Componente**")
                 for i, talla in enumerate(TALLAS):
@@ -428,7 +390,6 @@ def modulo_costo_produccion():
                         )
                         cambios_prenda[(talla, comp)] = nuevo
 
-                # Precio de venta por talla
                 st.markdown("---")
                 cols_pv = st.columns([1.2] + [1]*len(TALLAS))
                 cols_pv[0].markdown("**💲 Precio Venta**")
@@ -451,7 +412,6 @@ def modulo_costo_produccion():
                 time.sleep(0.3)
                 st.rerun()
 
-            # ── Tabla de resumen de márgenes ─────────────────────────
             st.markdown(f"#### Resumen de Rentabilidad — {prenda}")
             datos_actualizados = cargar_costos_prod()
             filas_margen = []
@@ -472,17 +432,8 @@ def modulo_costo_produccion():
                 })
 
             df_m = pd.DataFrame(filas_margen)
-            
-            def estilo_margen(val):
-                if isinstance(val, (int, float)):
-                    if val > 0: return "color:#69DB7C;font-weight:bold"
-                    elif val < 0: return "color:#FF5252;font-weight:bold"
-                return ""
-            
-            styled_m = df_m.style\
-                .format({"Costo Total":"S/ {:.2f}","Precio Venta":"S/ {:.2f}",
-                         "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})\
-                .map(estilo_margen, subset=["Margen S/","Margen %"])
+            styled_m = df_m.style.format({"Costo Total":"S/ {:.2f}","Precio Venta":"S/ {:.2f}",
+                         "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})
             st.dataframe(styled_m, use_container_width=True, hide_index=True)
 
 
@@ -497,12 +448,6 @@ def modulo_dashboard_socios():
     datos_flujo   = cargar_flujo(anio_sel)
     datos_costos  = cargar_costos_prod()
 
-    # ── Calcular totales anuales desde flujo de caja ─────────────────
-    def total_seccion(seccion):
-        return sum(v for (mes, conc), v in datos_flujo.items()
-                   if any(conc in CATS_FLUJO[seccion] for _ in [1]))
-
-    # Recalcular correctamente por sección
     tot_ing  = sum(v for (m,c),v in datos_flujo.items() if c in CATS_FLUJO["ingresos"])
     tot_cos  = sum(v for (m,c),v in datos_flujo.items() if c in CATS_FLUJO["costos"])
     tot_gas  = sum(v for (m,c),v in datos_flujo.items() if c in CATS_FLUJO["gastos_op"])
@@ -511,7 +456,6 @@ def modulo_dashboard_socios():
     margen   = (ut_neta / tot_ing * 100) if tot_ing > 0 else 0.0
     dividendo = ut_neta / 3
 
-    # ── KPI Cards ────────────────────────────────────────────────────
     st.markdown("### 💡 Indicadores Clave del Año")
     k1,k2,k3,k4,k5,k6 = st.columns(6)
     k1.metric("Ventas Totales",      f"S/ {tot_ing:,.2f}")
@@ -523,7 +467,6 @@ def modulo_dashboard_socios():
 
     st.divider()
 
-    # ── Dividendos individuales ───────────────────────────────────────
     st.markdown("### 🤝 Dividendos por Socio")
     dc1,dc2,dc3 = st.columns(3)
     for col, nombre in zip([dc1,dc2,dc3],["Cesar","Larry","Jahairo"]):
@@ -532,7 +475,6 @@ def modulo_dashboard_socios():
 
     st.divider()
 
-    # ── Gráficos en dos columnas ──────────────────────────────────────
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
@@ -560,7 +502,6 @@ def modulo_dashboard_socios():
 
     st.divider()
 
-    # ── Rentabilidad por prenda ───────────────────────────────────────
     st.markdown("### 👕 Rentabilidad por Prenda (Promedio todas las tallas)")
     filas_rent = []
     for prenda in PRENDAS:
@@ -583,22 +524,12 @@ def modulo_dashboard_socios():
                             "Precio Prom.":pp,"Margen S/":ms,"Margen %":mp})
 
     df_rent = pd.DataFrame(filas_rent)
-    
-    def estilo_rent(val):
-        if isinstance(val, (int, float)):
-            if val > 0: return "color:#69DB7C;font-weight:bold"
-            elif val < 0: return "color:#FF5252;font-weight:bold"
-        return ""
-    
-    styled_rent = df_rent.style\
-        .format({"Costo Prom.":"S/ {:.2f}","Precio Prom.":"S/ {:.2f}",
-                 "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})\
-        .map(estilo_rent, subset=["Margen S/","Margen %"])
+    styled_rent = df_rent.style.format({"Costo Prom.":"S/ {:.2f}","Precio Prom.":"S/ {:.2f}",
+                 "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})
     st.dataframe(styled_rent, use_container_width=True, hide_index=True)
 
     st.divider()
 
-    # ── Tallas más rentables por prenda ──────────────────────────────
     st.markdown("### 📐 Margen por Talla (detalle)")
     tabs_t = st.tabs([f"👕 {p}" for p in PRENDAS])
     for tab, prenda in zip(tabs_t, PRENDAS):
@@ -611,24 +542,15 @@ def modulo_dashboard_socios():
                 pct = (mt/pt*100) if pt > 0 else 0.0
                 filas_t.append({"Talla":talla,"Costo":ct,"Precio":pt,"Margen S/":mt,"Margen %":pct})
             df_t = pd.DataFrame(filas_t)
-            
-            def estilo_t(val):
-                if isinstance(val, (int, float)):
-                    if val > 0: return "color:#69DB7C;font-weight:bold"
-                    elif val < 0: return "color:#FF5252;font-weight:bold"
-                return ""
-            
             st.dataframe(
-                df_t.style
-                .format({"Costo":"S/ {:.2f}","Precio":"S/ {:.2f}",
-                         "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})
-                .map(estilo_t, subset=["Margen S/","Margen %"]),
+                df_t.style.format({"Costo":"S/ {:.2f}","Precio":"S/ {:.2f}",
+                         "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"}),
                 use_container_width=True, hide_index=True
             )
 
 
 # =====================================================================
-# 11. ESTRUCTURA PRINCIPAL DE LA APP
+# 11. ESTRUCTURA PRINCIPAL
 # =====================================================================
 if not st.session_state.logueado:
     st.title("🔐 ERP VILLAN")
@@ -922,7 +844,7 @@ else:
                 st.success("Egreso eliminado."); time.sleep(0.5); st.rerun()
 
     # ================================================================
-    # MÓDULOS DE FINANZAS — SOLO SOCIOS
+    # MÓDULOS DE FINANZAS
     # ================================================================
     elif menu == "Flujo de Caja" and es_socio:
         modulo_flujo_caja()
