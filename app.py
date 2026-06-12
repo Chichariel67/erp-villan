@@ -358,12 +358,16 @@ def modulo_flujo_caja():
 
     # Formato de moneda
     fmt_cols = ["Ingresos","Costos Prod.","Gastos Op.","Util. Bruta","Util. Neta"]
+    def estilo_utilidad(val):
+        if isinstance(val, (int, float)):
+            if val > 0: return "color:#69DB7C;font-weight:bold"
+            elif val < 0: return "color:#FF5252;font-weight:bold"
+        return ""
+    
     styled = df_res.style\
         .format({c: "S/ {:,.2f}" for c in fmt_cols})\
         .format({"Margen %": "{:.1f}%"})\
-        .applymap(lambda v: "color:#69DB7C;font-weight:bold" if isinstance(v,(int,float)) and v > 0 else
-                            ("color:#FF5252;font-weight:bold" if isinstance(v,(int,float)) and v < 0 else ""),
-                  subset=["Util. Neta"])
+        .map(estilo_utilidad, subset=["Util. Neta"])
     st.dataframe(styled, use_container_width=True, height=460)
 
     # ── Dividendos por socio ─────────────────────────────────────────
@@ -468,12 +472,17 @@ def modulo_costo_produccion():
                 })
 
             df_m = pd.DataFrame(filas_margen)
+            
+            def estilo_margen(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return "color:#69DB7C;font-weight:bold"
+                    elif val < 0: return "color:#FF5252;font-weight:bold"
+                return ""
+            
             styled_m = df_m.style\
                 .format({"Costo Total":"S/ {:.2f}","Precio Venta":"S/ {:.2f}",
                          "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})\
-                .applymap(lambda v: "color:#69DB7C;font-weight:bold" if isinstance(v,(int,float)) and v > 0 else
-                                    ("color:#FF5252;font-weight:bold" if isinstance(v,(int,float)) and v < 0 else ""),
-                          subset=["Margen S/","Margen %"])
+                .map(estilo_margen, subset=["Margen S/","Margen %"])
             st.dataframe(styled_m, use_container_width=True, hide_index=True)
 
 
@@ -574,12 +583,17 @@ def modulo_dashboard_socios():
                             "Precio Prom.":pp,"Margen S/":ms,"Margen %":mp})
 
     df_rent = pd.DataFrame(filas_rent)
+    
+    def estilo_rent(val):
+        if isinstance(val, (int, float)):
+            if val > 0: return "color:#69DB7C;font-weight:bold"
+            elif val < 0: return "color:#FF5252;font-weight:bold"
+        return ""
+    
     styled_rent = df_rent.style\
         .format({"Costo Prom.":"S/ {:.2f}","Precio Prom.":"S/ {:.2f}",
                  "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})\
-        .applymap(lambda v: "color:#69DB7C;font-weight:bold" if isinstance(v,(int,float)) and v>0 else
-                            ("color:#FF5252;font-weight:bold" if isinstance(v,(int,float)) and v<0 else ""),
-                  subset=["Margen S/","Margen %"])
+        .map(estilo_rent, subset=["Margen S/","Margen %"])
     st.dataframe(styled_rent, use_container_width=True, hide_index=True)
 
     st.divider()
@@ -597,13 +611,18 @@ def modulo_dashboard_socios():
                 pct = (mt/pt*100) if pt > 0 else 0.0
                 filas_t.append({"Talla":talla,"Costo":ct,"Precio":pt,"Margen S/":mt,"Margen %":pct})
             df_t = pd.DataFrame(filas_t)
+            
+            def estilo_t(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return "color:#69DB7C;font-weight:bold"
+                    elif val < 0: return "color:#FF5252;font-weight:bold"
+                return ""
+            
             st.dataframe(
                 df_t.style
                 .format({"Costo":"S/ {:.2f}","Precio":"S/ {:.2f}",
                          "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})
-                .applymap(lambda v: "color:#69DB7C;font-weight:bold" if isinstance(v,(int,float)) and v>0 else
-                                    ("color:#FF5252;font-weight:bold" if isinstance(v,(int,float)) and v<0 else ""),
-                          subset=["Margen S/","Margen %"]),
+                .map(estilo_t, subset=["Margen S/","Margen %"]),
                 use_container_width=True, hide_index=True
             )
 
