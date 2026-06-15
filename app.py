@@ -132,7 +132,7 @@ def inicializar_base_datos():
             id INTEGER PRIMARY KEY AUTOINCREMENT, producto TEXT,
             categoria TEXT, talla TEXT, stock INTEGER, costo_base REAL DEFAULT 0.0)""")
 
-        # --- NUEVA TABLA HISTÓRICA DE MOVIMIENTOS ---
+        # --- TABLA HISTÓRICA DE MOVIMIENTOS ---
         c.execute("""CREATE TABLE IF NOT EXISTS movimientos_inventario(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT,
@@ -456,7 +456,7 @@ def modulo_costo_produccion():
 # 10. MÓDULO FINANZAS — DASHBOARD SOCIOS
 # =====================================================================
 def modulo_dashboard_socios():
-    st.title("📊 Dashboard Ejecutivo — Socios")
+    st.title("📊 Dashboard Executive — Socios")
 
     anio_sel = st.selectbox("Año a analizar", [datetime.now().year, datetime.now().year-1,
                                                 datetime.now().year+1], key="dash_anio")
@@ -719,7 +719,7 @@ else:
                             (fecha_str,mes_str,mes_nom,anio,sku,obj["Producto"],obj["Categoría"],
                              obj["Talla"],canal,cliente,precio,costo_real,ut_calc,vendedor))
                         
-                        # --- TRIGGER DE HISTORIAL: MOVIMIENTO SALIDA POR VENTA ---
+                        # --- HISTORIAL: MOVIMIENTO SALIDA POR VENTA ---
                         conn.execute("""INSERT INTO movimientos_inventario(
                             fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                             VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
@@ -770,7 +770,7 @@ else:
                                 conn.execute("UPDATE inventario SET stock=? WHERE id=?", (item["Stock"],item["id"]))
                                 break
                         
-                        # --- TRIGGER DE HISTORIAL: MOVIMIENTO DEVOLUCIÓN POR ANULACIÓN ---
+                        # --- HISTORIAL: MOVIMIENTO DEVOLUCIÓN POR ANULACIÓN ---
                         conn.execute("""INSERT INTO movimientos_inventario(
                             fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                             VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
@@ -783,44 +783,76 @@ else:
                     st.success("Venta anulada y stock devuelto."); time.sleep(0.8); st.rerun()
 
     # ================================================================
-    # MÓDULO: INVENTARIO
+    # MÓDULO: INVENTARIO (REDISEÑADO CON FECHAS PASADAS)
     # ================================================================
     elif menu == "Inventario":
         st.title("📦 Almacén Central e Inventario")
+        
         if es_socio:
-            with st.expander("➕ Ingreso de Mercadería", expanded=False):
-                prod  = st.text_input("Nombre de la Prenda").strip().title()
-                cat   = st.selectbox("Categoría", ["Pantalón","Polo","Polera","Casaca","Short","Otro"])
-                tll   = st.selectbox("Talla", TALLAS)
-                stk   = st.number_input("Unidades", min_value=1, step=1)
-                c_b   = st.number_input("Costo Unitario (S/)", min_value=0.0, value=40.0, step=1.0)
+            with st.expander("➕ Ingreso de Mercadería (Con historial retroactivo)", expanded=True):
+                # Campos Base
+                col_i1, col_i2, col_i3 = st.columns(3)
+                with col_i1:
+                    prod = st.text_input("Nombre de la Prenda").strip().title()
+                    cat  = st.selectbox("Categoría", ["Pantalón","Polo","Polera","Casaca","Short","Otro"])
+                with col_i2:
+                    tll  = st.selectbox("Talla", TALLAS)
+                    stk  = st.number_input("Unidades", min_value=1, step=1)
+                with col_i3:
+                    c_b  = st.number_input("Costo Unitario (S/)", min_value=0.0, value=40.0, step=1.0)
+                    
+                # NUEVO BLOQUE: Selectores de tiempo para stock pasado
+                st.markdown("**📅 Configuración de Fecha del Lote (Para registrar meses pasados)**")
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    usar_retroactivo = st.checkbox("¿Es un lote de una fecha o mes pasado?", value=False)
+                with col_f2:
+                    if usar_retroactivo:
+                        fecha_ingreso = st.date_input("Selecciona la fecha real en que entró este stock", datetime.now())
+                    else:
+                        fecha_ingreso = datetime.now()
+
                 if st.button("💾 Guardar Ingreso"):
                     if prod:
-                        fecha_hoy = datetime.now()
+                        # Extraer variables de tiempo seleccionadas por el usuario
+                        if isinstance(fecha_ingreso, datetime):
+                            f_str = fecha_ingreso.strftime("%d/%m/%Y")
+                            m_str = fecha_ingreso.strftime("%m")
+                            m_nom = MESES[m_str]
+                            a_int = fecha_ingreso.year
+                        else: # Es un objeto date de streamlit
+                            f_str = fecha_ingreso.strftime("%d/%m/%Y")
+                            m_str = fecha_ingreso.strftime("%m")
+                            m_nom = MESES[m_str]
+                            a_int = fecha_ingreso.year
+
                         with sqlite3.connect(DB_NAME, timeout=20) as conn:
                             existe = False
                             for item in st.session_state.inventario:
                                 if item["Producto"]==prod and item["Talla"]==tll:
-                                    item["Stock"] += stk; item["Costo_Base"] = c_b
+                                    item["Stock"] += stk
+                                    item["Costo_Base"] = c_b
                                     conn.execute("UPDATE inventario SET stock=?,costo_base=? WHERE id=?",
-                                                 (item["Stock"],c_b,item["id"]))
-                                    existe = True; break
+                                                 (item["Stock"], c_b, item["id"]))
+                                    existe = True
+                                    break
                             if not existe:
                                 conn.execute("INSERT INTO inventario(producto,categoria,talla,stock,costo_base) VALUES(?,?,?,?,?)",
-                                             (prod,cat,tll,stk,c_b))
+                                             (prod, cat, tll, stk, c_b))
                                 nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                                 st.session_state.inventario.append({"id":nid,"Producto":prod,"Categoría":cat,
                                                                      "Talla":tll,"Stock":stk,"Costo_Base":c_b})
                             
-                            # --- TRIGGER DE HISTORIAL: MOVIMIENTO INGRESO ---
+                            # --- SE LOGUEA EL MOVIMIENTO CON LA FECHA HISTÓRICA ELEGIDA ---
                             conn.execute("""INSERT INTO movimientos_inventario(
                                 fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                                (fecha_hoy.strftime("%d/%m/%Y"), fecha_hoy.strftime("%m"), MESES[fecha_hoy.strftime("%m")],
-                                 fecha_hoy.year, prod, cat, tll, "INGRESO", stk, c_b, st.session_state.usuario_actual))
+                                (f_str, m_str, m_nom, a_int, prod, cat, tll, "INGRESO", stk, c_b, st.session_state.usuario_actual))
                             
                             conn.commit()
-                        st.success("✅ Inventario actualizado."); time.sleep(0.5); st.rerun()
+                        st.success(f"✅ Inventario guardado correctamente con fecha: {f_str} ({m_nom})")
+                        time.sleep(0.5)
+                        st.rerun()
                     else:
                         st.error("Escribe el nombre de la prenda.")
 
@@ -828,9 +860,10 @@ else:
             df_inv = pd.DataFrame(st.session_state.inventario)
             df_inv.index = range(1, len(df_inv)+1)
             ocultar_inv = ["id"] + ([] if es_socio else ["Costo_Base"])
-            st.subheader("📋 Estado del Almacén")
+            st.subheader("📋 Estado Real del Almacén (Stock Actualizado)")
             df_inv_m = df_inv.drop(columns=ocultar_inv, errors="ignore")
             st.dataframe(df_inv_m, use_container_width=True)
+            
             bajo = df_inv_m[df_inv_m["Stock"] <= 3]
             st.subheader("⚠ Alertas de Stock Crítico")
             if not bajo.empty:
@@ -839,18 +872,40 @@ else:
             else:
                 st.success("Almacén estable. Todo sobre el margen crítico.")
                 
-            # --- SECCIÓN VISTA DE AUDITORÍA HISTÓRICA DE INVENTARIO ---
+            # --- SECCIÓN VISTA DE AUDITORÍA HISTÓRICA DE INVENTARIO POR MESES ---
             st.divider()
-            st.subheader("📅 Historial de Movimientos")
+            st.subheader("📅 Historial General de Movimientos")
+            
             with sqlite3.connect(DB_NAME) as conn:
                 movs = pd.read_sql_query("""
-                    SELECT fecha, producto, talla, tipo, cantidad, costo_unitario, usuario
+                    SELECT fecha, mes_nombre as Mes, anio as Año, producto as Producto, 
+                           talla as Talla, tipo as Tipo, cantidad as Cantidad, 
+                           costo_unitario as [Costo Unitario], usuario as Usuario
                     FROM movimientos_inventario
                     ORDER BY id DESC
                 """, conn)
-            st.dataframe(movs, use_container_width=True)
+            
+            # Filtros dinámicos interactivos para auditar meses pasados
+            st.markdown("#### 🔍 Filtrar Kárdex Histórico")
+            col_b1, col_b2, col_b3 = st.columns(3)
+            with col_b1:
+                filtro_a = st.selectbox("Filtrar Historial por Año", ["Todos"] + sorted(list(movs["Año"].unique().astype(str)), reverse=True) if not movs.empty else ["Todos"])
+            with col_b2:
+                filtro_m = st.selectbox("Filtrar Historial por Mes", ["Todos"] + MESES_ORD)
+            with col_b3:
+                filtro_t = st.selectbox("Filtrar por Tipo de Operación", ["Todos", "INGRESO", "SALIDA", "DEVOLUCION"])
+            
+            df_filtrado = movs.copy()
+            if filtro_a != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Año"].astype(str) == filtro_a]
+            if filtro_m != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Mes"] == filtro_m]
+            if filtro_t != "Todos":
+                df_filtrado = df_filtrado[df_filtrado["Tipo"] == filtro_t]
+                
+            st.dataframe(df_filtrado, use_container_width=True)
 
-            st.subheader("📈 Inventario Histórico por Mes")
+            st.subheader("📈 Balance Acumulado de Movimientos por Mes")
             with sqlite3.connect(DB_NAME) as conn:
                 hist = pd.read_sql_query("""
                     SELECT anio, mes_nombre, tipo, SUM(cantidad) cantidad
@@ -859,14 +914,24 @@ else:
                 """, conn)
 
             if not hist.empty:
+                # Reindexamos los meses para que aparezcan cronológicamente (Ene, Feb, Mar...) y no alfabéticamente
                 pivot = hist.pivot_table(
                     index="mes_nombre",
                     columns="tipo",
                     values="cantidad",
                     aggfunc="sum"
                 ).fillna(0)
+                
+                # Asegurar la existencia de las columnas básicas para evitar errores de renderizado
+                for col_tipo in ["INGRESO", "SALIDA", "DEVOLUCION"]:
+                    if col_tipo not in pivot.columns:
+                        pivot[col_tipo] = 0.0
+                
+                pivot = pivot.reindex([m for m in MESES_ORD if m in pivot.index])
                 st.dataframe(pivot, use_container_width=True)
                 st.bar_chart(pivot)
+            else:
+                st.info("Aún no se han registrado movimientos históricos para graficar.")
 
     # ================================================================
     # MÓDULO: GASTOS
