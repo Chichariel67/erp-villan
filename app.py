@@ -132,7 +132,6 @@ def inicializar_base_datos():
             id INTEGER PRIMARY KEY AUTOINCREMENT, producto TEXT,
             categoria TEXT, talla TEXT, stock INTEGER, costo_base REAL DEFAULT 0.0)""")
 
-        # --- TABLA HISTÓRICA DE MOVIMIENTOS ---
         c.execute("""CREATE TABLE IF NOT EXISTS movimientos_inventario(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT,
@@ -370,6 +369,61 @@ def modulo_flujo_caja():
         file_name=f"FlujoCaja_Villan_{anio_sel}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+    # =====================================================================
+    # 🗑 BORRADO DE FLUJO DE CAJA — NUEVO
+    # =====================================================================
+    st.divider()
+    with st.expander("🗑 Borrar datos del Flujo de Caja", expanded=False):
+        st.warning("⚠️ Estas acciones eliminan datos permanentemente. Úsalas con cuidado.")
+
+        st.markdown("#### Opción 1 — Poner en cero un mes completo")
+        col_bfc1, col_bfc2 = st.columns(2)
+        with col_bfc1:
+            mes_borrar_fc = st.selectbox("Mes a limpiar", MESES_ORD, key="fc_borrar_mes")
+        with col_bfc2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button(f"🧹 Poner en cero {mes_borrar_fc} {anio_sel}", key="btn_fc_borrar_mes"):
+                with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                    conn.execute(
+                        "UPDATE flujo_caja SET monto=0.0 WHERE anio=? AND mes_nombre=?",
+                        (anio_sel, mes_borrar_fc)
+                    )
+                    conn.commit()
+                st.success(f"✅ Todos los montos de {mes_borrar_fc} {anio_sel} puestos en cero.")
+                time.sleep(0.5)
+                st.rerun()
+
+        st.markdown("#### Opción 2 — Borrar todo el año seleccionado")
+        confirmar_anio = st.checkbox(
+            f"Confirmo que quiero BORRAR COMPLETAMENTE el flujo de caja del año {anio_sel}",
+            key="fc_confirmar_anio"
+        )
+        if st.button(f"💣 Eliminar todo el año {anio_sel}", key="btn_fc_borrar_anio", disabled=not confirmar_anio):
+            with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                conn.execute("DELETE FROM flujo_caja WHERE anio=?", (anio_sel,))
+                conn.commit()
+            st.success(f"✅ Flujo de caja del año {anio_sel} eliminado por completo.")
+            time.sleep(0.5)
+            st.rerun()
+
+        st.markdown("#### Opción 3 — Poner en cero un concepto específico en todo el año")
+        todas_las_secciones = {c: s for s, conceptos in CATS_FLUJO.items() for c in conceptos}
+        concepto_limpiar = st.selectbox(
+            "Selecciona el concepto",
+            list(todas_las_secciones.keys()),
+            key="fc_concepto_limpiar"
+        )
+        if st.button(f"🧹 Limpiar '{concepto_limpiar}' en todo {anio_sel}", key="btn_fc_borrar_concepto"):
+            with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                conn.execute(
+                    "UPDATE flujo_caja SET monto=0.0 WHERE anio=? AND concepto=?",
+                    (anio_sel, concepto_limpiar)
+                )
+                conn.commit()
+            st.success(f"✅ '{concepto_limpiar}' puesto en cero para todos los meses de {anio_sel}.")
+            time.sleep(0.5)
+            st.rerun()
+
 
 # =====================================================================
 # 9. MÓDULO FINANZAS — COSTO DE PRODUCCIÓN
@@ -450,6 +504,63 @@ def modulo_costo_produccion():
             styled_m = df_m.style.format({"Costo Total":"S/ {:.2f}","Precio Venta":"S/ {:.2f}",
                          "Margen S/":"S/ {:.2f}","Margen %":"{:.1f}%"})
             st.dataframe(styled_m, use_container_width=True, hide_index=True)
+
+            # =====================================================================
+            # 🗑 BORRADO DE COSTOS DE PRODUCCIÓN — NUEVO
+            # =====================================================================
+            st.divider()
+            with st.expander(f"🗑 Limpiar costos de {prenda}", expanded=False):
+                st.warning("⚠️ Estas acciones ponen costos y precios en cero permanentemente.")
+
+                st.markdown("#### Opción 1 — Limpiar una talla completa")
+                talla_limpiar = st.selectbox(
+                    "Selecciona la talla a limpiar",
+                    TALLAS,
+                    key=f"cp_borrar_talla_{prenda}"
+                )
+                if st.button(f"🧹 Poner en cero talla {talla_limpiar} de {prenda}", key=f"btn_cp_talla_{prenda}_{talla_limpiar}"):
+                    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                        conn.execute(
+                            "UPDATE costo_produccion SET costo=0.0, precio_venta=0.0 WHERE prenda=? AND talla=?",
+                            (prenda, talla_limpiar)
+                        )
+                        conn.commit()
+                    st.success(f"✅ Costos de {prenda} talla {talla_limpiar} puestos en cero.")
+                    time.sleep(0.4)
+                    st.rerun()
+
+                st.markdown("#### Opción 2 — Limpiar un componente en todas las tallas")
+                comp_limpiar = st.selectbox(
+                    "Componente a limpiar",
+                    COMPONENTES_COSTO,
+                    key=f"cp_borrar_comp_{prenda}"
+                )
+                if st.button(f"🧹 Limpiar '{comp_limpiar}' en todas las tallas de {prenda}", key=f"btn_cp_comp_{prenda}_{comp_limpiar}"):
+                    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                        conn.execute(
+                            "UPDATE costo_produccion SET costo=0.0 WHERE prenda=? AND componente=?",
+                            (prenda, comp_limpiar)
+                        )
+                        conn.commit()
+                    st.success(f"✅ Componente '{comp_limpiar}' de {prenda} puesto en cero en todas las tallas.")
+                    time.sleep(0.4)
+                    st.rerun()
+
+                st.markdown(f"#### Opción 3 — Limpiar TODO {prenda}")
+                confirmar_prenda = st.checkbox(
+                    f"Confirmo que quiero borrar TODOS los costos de {prenda}",
+                    key=f"cp_confirmar_todo_{prenda}"
+                )
+                if st.button(f"💣 Eliminar todos los costos de {prenda}", key=f"btn_cp_todo_{prenda}", disabled=not confirmar_prenda):
+                    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                        conn.execute(
+                            "UPDATE costo_produccion SET costo=0.0, precio_venta=0.0 WHERE prenda=?",
+                            (prenda,)
+                        )
+                        conn.commit()
+                    st.success(f"✅ Todos los costos de {prenda} fueron puestos en cero.")
+                    time.sleep(0.4)
+                    st.rerun()
 
 
 # =====================================================================
@@ -718,13 +829,10 @@ else:
                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (fecha_str,mes_str,mes_nom,anio,sku,obj["Producto"],obj["Categoría"],
                              obj["Talla"],canal,cliente,precio,costo_real,ut_calc,vendedor))
-                        
-                        # --- HISTORIAL: MOVIMIENTO SALIDA POR VENTA ---
                         conn.execute("""INSERT INTO movimientos_inventario(
                             fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                             VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                             (fecha_str, mes_str, mes_nom, anio, obj["Producto"], obj["Categoría"], obj["Talla"], "SALIDA", 1, costo_real, vendedor))
-                        
                         nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                         conn.commit()
 
@@ -769,28 +877,24 @@ else:
                                 item["Stock"] += 1
                                 conn.execute("UPDATE inventario SET stock=? WHERE id=?", (item["Stock"],item["id"]))
                                 break
-                        
-                        # --- HISTORIAL: MOVIMIENTO DEVOLUCIÓN POR ANULACIÓN ---
                         conn.execute("""INSERT INTO movimientos_inventario(
                             fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                             VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                             (datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%m"), MESES[datetime.now().strftime("%m")],
                              datetime.now().year, v_sel["Producto"], v_sel["Categoría"], v_sel["Talla"], "DEVOLUCION", 1, v_sel["Costo"], st.session_state.usuario_actual))
-                        
                         conn.execute("DELETE FROM ventas WHERE id=?", (v_sel["id"],))
                         conn.commit()
                     st.session_state.ventas = [v for v in st.session_state.ventas if v["id"]!=id_sel]
                     st.success("Venta anulada y stock devuelto."); time.sleep(0.8); st.rerun()
 
     # ================================================================
-    # MÓDULO: INVENTARIO (REDISEÑADO CON FECHAS PASADAS)
+    # MÓDULO: INVENTARIO
     # ================================================================
     elif menu == "Inventario":
         st.title("📦 Almacén Central e Inventario")
-        
+
         if es_socio:
             with st.expander("➕ Ingreso de Mercadería (Con historial retroactivo)", expanded=True):
-                # Campos Base
                 col_i1, col_i2, col_i3 = st.columns(3)
                 with col_i1:
                     prod = st.text_input("Nombre de la Prenda").strip().title()
@@ -800,8 +904,7 @@ else:
                     stk  = st.number_input("Unidades", min_value=1, step=1)
                 with col_i3:
                     c_b  = st.number_input("Costo Unitario (S/)", min_value=0.0, value=40.0, step=1.0)
-                    
-                # NUEVO BLOQUE: Selectores de tiempo para stock pasado
+
                 st.markdown("**📅 Configuración de Fecha del Lote (Para registrar meses pasados)**")
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
@@ -814,13 +917,12 @@ else:
 
                 if st.button("💾 Guardar Ingreso"):
                     if prod:
-                        # Extraer variables de tiempo seleccionadas por el usuario
                         if isinstance(fecha_ingreso, datetime):
                             f_str = fecha_ingreso.strftime("%d/%m/%Y")
                             m_str = fecha_ingreso.strftime("%m")
                             m_nom = MESES[m_str]
                             a_int = fecha_ingreso.year
-                        else: # Es un objeto date de streamlit
+                        else:
                             f_str = fecha_ingreso.strftime("%d/%m/%Y")
                             m_str = fecha_ingreso.strftime("%m")
                             m_nom = MESES[m_str]
@@ -842,19 +944,164 @@ else:
                                 nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                                 st.session_state.inventario.append({"id":nid,"Producto":prod,"Categoría":cat,
                                                                      "Talla":tll,"Stock":stk,"Costo_Base":c_b})
-                            
-                            # --- SE LOGUEA EL MOVIMIENTO CON LA FECHA HISTÓRICA ELEGIDA ---
                             conn.execute("""INSERT INTO movimientos_inventario(
                                 fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
                                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                                 (f_str, m_str, m_nom, a_int, prod, cat, tll, "INGRESO", stk, c_b, st.session_state.usuario_actual))
-                            
                             conn.commit()
                         st.success(f"✅ Inventario guardado correctamente con fecha: {f_str} ({m_nom})")
                         time.sleep(0.5)
                         st.rerun()
                     else:
                         st.error("Escribe el nombre de la prenda.")
+
+            # =====================================================================
+            # 🗑 BORRADO DE INVENTARIO — NUEVO
+            # =====================================================================
+            with st.expander("🗑 Gestionar / Corregir productos del inventario", expanded=False):
+                st.warning("⚠️ Estas acciones modifican el inventario permanentemente.")
+
+                if st.session_state.inventario:
+                    st.markdown("#### Opción 1 — Ajustar stock de un producto")
+                    st.caption("Usa esto si cometiste un error al ingresar unidades o necesitas hacer un ajuste manual.")
+                    mapa_inv = {
+                        i["id"]: f"{i['Producto']} | Talla {i['Talla']} | Stock actual: {i['Stock']} und"
+                        for i in st.session_state.inventario
+                    }
+                    id_ajuste = st.selectbox(
+                        "Selecciona el producto a ajustar:",
+                        list(mapa_inv.keys()),
+                        format_func=lambda x: mapa_inv[x],
+                        key="inv_ajuste_sel"
+                    )
+                    item_ajuste = next((i for i in st.session_state.inventario if i["id"] == id_ajuste), None)
+                    if item_ajuste:
+                        col_aj1, col_aj2 = st.columns(2)
+                        with col_aj1:
+                            nuevo_stock_manual = st.number_input(
+                                "Nuevo stock correcto (unidades reales en almacén):",
+                                min_value=0, step=1,
+                                value=int(item_ajuste["Stock"]),
+                                key="inv_nuevo_stock"
+                            )
+                        with col_aj2:
+                            motivo_ajuste = st.text_input(
+                                "Motivo del ajuste (para el historial):",
+                                placeholder="Ej: Error de conteo, merma, etc.",
+                                key="inv_motivo_ajuste"
+                            )
+                        if st.button("✏️ Aplicar Ajuste de Stock", key="btn_inv_ajuste"):
+                            if motivo_ajuste.strip():
+                                diferencia = nuevo_stock_manual - item_ajuste["Stock"]
+                                tipo_mov = "AJUSTE_ENTRADA" if diferencia >= 0 else "AJUSTE_SALIDA"
+                                fecha_hoy = datetime.now()
+                                with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                                    conn.execute(
+                                        "UPDATE inventario SET stock=? WHERE id=?",
+                                        (nuevo_stock_manual, item_ajuste["id"])
+                                    )
+                                    conn.execute("""INSERT INTO movimientos_inventario(
+                                        fecha, mes, mes_nombre, anio, producto, categoria, talla,
+                                        tipo, cantidad, costo_unitario, usuario)
+                                        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                        (fecha_hoy.strftime("%d/%m/%Y"),
+                                         fecha_hoy.strftime("%m"),
+                                         MESES[fecha_hoy.strftime("%m")],
+                                         fecha_hoy.year,
+                                         item_ajuste["Producto"],
+                                         item_ajuste["Categoría"],
+                                         item_ajuste["Talla"],
+                                         f"{tipo_mov} ({motivo_ajuste})",
+                                         abs(diferencia),
+                                         item_ajuste["Costo_Base"],
+                                         st.session_state.usuario_actual))
+                                    conn.commit()
+                                item_ajuste["Stock"] = nuevo_stock_manual
+                                st.success(f"✅ Stock ajustado a {nuevo_stock_manual} unidades. Movimiento registrado en el historial.")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error("❌ Debes escribir el motivo del ajuste para que quede registrado en el historial.")
+
+                    st.divider()
+                    st.markdown("#### Opción 2 — Eliminar un producto del inventario por completo")
+                    st.caption("Útil si registraste una prenda por error o ya no existe en el catálogo.")
+                    mapa_inv_del = {
+                        i["id"]: f"{i['Producto']} | Talla {i['Talla']} | Stock: {i['Stock']} und"
+                        for i in st.session_state.inventario
+                    }
+                    id_eliminar = st.selectbox(
+                        "Selecciona el producto a eliminar:",
+                        list(mapa_inv_del.keys()),
+                        format_func=lambda x: mapa_inv_del[x],
+                        key="inv_eliminar_sel"
+                    )
+                    item_eliminar = next((i for i in st.session_state.inventario if i["id"] == id_eliminar), None)
+                    if item_eliminar:
+                        confirmar_eli = st.checkbox(
+                            f"Confirmo que quiero ELIMINAR '{item_eliminar['Producto']}' talla {item_eliminar['Talla']} del inventario",
+                            key="inv_confirmar_eliminar"
+                        )
+                        if st.button("💣 Eliminar producto del inventario", key="btn_inv_eliminar", disabled=not confirmar_eli):
+                            fecha_hoy = datetime.now()
+                            with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                                conn.execute("""INSERT INTO movimientos_inventario(
+                                    fecha, mes, mes_nombre, anio, producto, categoria, talla,
+                                    tipo, cantidad, costo_unitario, usuario)
+                                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                    (fecha_hoy.strftime("%d/%m/%Y"),
+                                     fecha_hoy.strftime("%m"),
+                                     MESES[fecha_hoy.strftime("%m")],
+                                     fecha_hoy.year,
+                                     item_eliminar["Producto"],
+                                     item_eliminar["Categoría"],
+                                     item_eliminar["Talla"],
+                                     "BAJA_PRODUCTO",
+                                     item_eliminar["Stock"],
+                                     item_eliminar["Costo_Base"],
+                                     st.session_state.usuario_actual))
+                                conn.execute("DELETE FROM inventario WHERE id=?", (item_eliminar["id"],))
+                                conn.commit()
+                            st.session_state.inventario = [
+                                i for i in st.session_state.inventario if i["id"] != id_eliminar
+                            ]
+                            st.success(f"✅ '{item_eliminar['Producto']}' talla {item_eliminar['Talla']} eliminado del inventario. Movimiento de baja registrado.")
+                            time.sleep(0.5)
+                            st.rerun()
+
+                    st.divider()
+                    st.markdown("#### Opción 3 — Eliminar un movimiento del historial por error")
+                    st.caption("Usa esto si registraste un ingreso o movimiento con datos incorrectos.")
+                    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                        movs_raw = conn.execute("""
+                            SELECT id, fecha, mes_nombre, producto, talla, tipo, cantidad, usuario
+                            FROM movimientos_inventario
+                            ORDER BY id DESC LIMIT 100
+                        """).fetchall()
+                    if movs_raw:
+                        mapa_movs = {
+                            r[0]: f"ID:{r[0]} | {r[1]} | {r[3]} T:{r[4]} | {r[5]} x{r[6]} | por {r[7]}"
+                            for r in movs_raw
+                        }
+                        id_mov_del = st.selectbox(
+                            "Selecciona el movimiento a eliminar:",
+                            list(mapa_movs.keys()),
+                            format_func=lambda x: mapa_movs[x],
+                            key="inv_mov_del_sel"
+                        )
+                        confirmar_mov = st.checkbox(
+                            "Confirmo que este movimiento fue un error y quiero eliminarlo del historial",
+                            key="inv_confirmar_mov_del"
+                        )
+                        if st.button("🗑 Eliminar movimiento del historial", key="btn_inv_mov_del", disabled=not confirmar_mov):
+                            with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                                conn.execute("DELETE FROM movimientos_inventario WHERE id=?", (id_mov_del,))
+                                conn.commit()
+                            st.success("✅ Movimiento eliminado del historial. Nota: el stock actual no se modifica automáticamente; ajústalo si es necesario en la Opción 1.")
+                            time.sleep(0.5)
+                            st.rerun()
+                    else:
+                        st.info("No hay movimientos registrados aún.")
 
         if st.session_state.inventario:
             df_inv = pd.DataFrame(st.session_state.inventario)
@@ -863,7 +1110,7 @@ else:
             st.subheader("📋 Estado Real del Almacén (Stock Actualizado)")
             df_inv_m = df_inv.drop(columns=ocultar_inv, errors="ignore")
             st.dataframe(df_inv_m, use_container_width=True)
-            
+
             bajo = df_inv_m[df_inv_m["Stock"] <= 3]
             st.subheader("⚠ Alertas de Stock Crítico")
             if not bajo.empty:
@@ -871,21 +1118,19 @@ else:
                 st.dataframe(bajo, use_container_width=True)
             else:
                 st.success("Almacén estable. Todo sobre el margen crítico.")
-                
-            # --- SECCIÓN VISTA DE AUDITORÍA HISTÓRICA DE INVENTARIO POR MESES ---
+
             st.divider()
             st.subheader("📅 Historial General de Movimientos")
-            
+
             with sqlite3.connect(DB_NAME) as conn:
                 movs = pd.read_sql_query("""
-                    SELECT fecha, mes_nombre as Mes, anio as Año, producto as Producto, 
-                           talla as Talla, tipo as Tipo, cantidad as Cantidad, 
+                    SELECT fecha, mes_nombre as Mes, anio as Año, producto as Producto,
+                           talla as Talla, tipo as Tipo, cantidad as Cantidad,
                            costo_unitario as [Costo Unitario], usuario as Usuario
                     FROM movimientos_inventario
                     ORDER BY id DESC
                 """, conn)
-            
-            # Filtros dinámicos interactivos para auditar meses pasados
+
             st.markdown("#### 🔍 Filtrar Kárdex Histórico")
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
@@ -893,16 +1138,16 @@ else:
             with col_b2:
                 filtro_m = st.selectbox("Filtrar Historial por Mes", ["Todos"] + MESES_ORD)
             with col_b3:
-                filtro_t = st.selectbox("Filtrar por Tipo de Operación", ["Todos", "INGRESO", "SALIDA", "DEVOLUCION"])
-            
+                filtro_t = st.selectbox("Filtrar por Tipo de Operación", ["Todos", "INGRESO", "SALIDA", "DEVOLUCION", "AJUSTE_ENTRADA", "AJUSTE_SALIDA", "BAJA_PRODUCTO"])
+
             df_filtrado = movs.copy()
             if filtro_a != "Todos":
                 df_filtrado = df_filtrado[df_filtrado["Año"].astype(str) == filtro_a]
             if filtro_m != "Todos":
                 df_filtrado = df_filtrado[df_filtrado["Mes"] == filtro_m]
             if filtro_t != "Todos":
-                df_filtrado = df_filtrado[df_filtrado["Tipo"] == filtro_t]
-                
+                df_filtrado = df_filtrado[df_filtrado["Tipo"].str.startswith(filtro_t)]
+
             st.dataframe(df_filtrado, use_container_width=True)
 
             st.subheader("📈 Balance Acumulado de Movimientos por Mes")
@@ -914,19 +1159,17 @@ else:
                 """, conn)
 
             if not hist.empty:
-                # Reindexamos los meses para que aparezcan cronológicamente (Ene, Feb, Mar...) y no alfabéticamente
                 pivot = hist.pivot_table(
                     index="mes_nombre",
                     columns="tipo",
                     values="cantidad",
                     aggfunc="sum"
                 ).fillna(0)
-                
-                # Asegurar la existencia de las columnas básicas para evitar errores de renderizado
+
                 for col_tipo in ["INGRESO", "SALIDA", "DEVOLUCION"]:
                     if col_tipo not in pivot.columns:
                         pivot[col_tipo] = 0.0
-                
+
                 pivot = pivot.reindex([m for m in MESES_ORD if m in pivot.index])
                 st.dataframe(pivot, use_container_width=True)
                 st.bar_chart(pivot)
@@ -1017,6 +1260,38 @@ else:
                     st.error("❌ El usuario ya existe.")
             else:
                 st.error("❌ Completa ambos campos.")
+        st.divider()
+        st.subheader("🔑 Cambiar Contraseña de un Usuario")
+        st.caption("Úsalo si un vendedor olvidó su clave o necesitas resetearla.")
+        todos_usuarios = [u for u in lista_u]
+        mapa_cambio_clave = {u[0]: u[1].title() for u in todos_usuarios}
+        id_cambio = st.selectbox(
+            "Usuario al que cambiar contraseña:",
+            list(mapa_cambio_clave.keys()),
+            format_func=lambda x: mapa_cambio_clave[x],
+            key="usr_cambio_sel"
+        )
+        col_cc1, col_cc2 = st.columns(2)
+        with col_cc1:
+            nueva_clave_1 = st.text_input("Nueva contraseña:", type="password", key="usr_nueva_clave1")
+        with col_cc2:
+            nueva_clave_2 = st.text_input("Confirmar nueva contraseña:", type="password", key="usr_nueva_clave2")
+        if st.button("🔑 Actualizar Contraseña", key="btn_cambio_clave"):
+            if nueva_clave_1 and nueva_clave_2:
+                if nueva_clave_1 == nueva_clave_2:
+                    with sqlite3.connect(DB_NAME, timeout=20) as conn:
+                        conn.execute(
+                            "UPDATE usuarios SET clave=? WHERE id=?",
+                            (hashear_clave(nueva_clave_1), id_cambio)
+                        )
+                        conn.commit()
+                    st.success(f"✅ Contraseña de '{mapa_cambio_clave[id_cambio]}' actualizada correctamente.")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("❌ Las contraseñas no coinciden.")
+            else:
+                st.error("❌ Completa ambos campos de contraseña.")
         st.divider()
         st.subheader("🗑 Revocar Acceso")
         eliminables = [u for u in lista_u if u[1] not in SOCIOS]
