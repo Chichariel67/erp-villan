@@ -132,6 +132,21 @@ def inicializar_base_datos():
             id INTEGER PRIMARY KEY AUTOINCREMENT, producto TEXT,
             categoria TEXT, talla TEXT, stock INTEGER, costo_base REAL DEFAULT 0.0)""")
 
+        # --- NUEVA TABLA HISTÓRICA DE MOVIMIENTOS ---
+        c.execute("""CREATE TABLE IF NOT EXISTS movimientos_inventario(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            mes TEXT,
+            mes_nombre TEXT,
+            anio INTEGER,
+            producto TEXT,
+            categoria TEXT,
+            talla TEXT,
+            tipo TEXT,
+            cantidad INTEGER,
+            costo_unitario REAL DEFAULT 0.0,
+            usuario TEXT)""")
+
         c.execute("""CREATE TABLE IF NOT EXISTS usuarios(
             id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE, clave TEXT)""")
 
@@ -637,8 +652,8 @@ else:
 
         c1,c2,c3,c4,c5 = st.columns(5)
         c1.metric("Ventas Totales",   f"S/ {tv:,.2f}")
-        c2.metric("Costos Producción",f"S/ {tc:,.2f}")
-        c3.metric("Gastos Operativos",f"S/ {tg:,.2f}")
+        c2.metric("Costos Producción", f"S/ {tc:,.2f}")
+        c3.metric("Gastos Operativos", f"S/ {tg:,.2f}")
         c4.metric("Utilidad Neta",    f"S/ {ut:,.2f}")
         c5.metric("Margen Beneficio", f"{mg:.2f}%")
         st.divider()
@@ -703,6 +718,13 @@ else:
                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (fecha_str,mes_str,mes_nom,anio,sku,obj["Producto"],obj["Categoría"],
                              obj["Talla"],canal,cliente,precio,costo_real,ut_calc,vendedor))
+                        
+                        # --- TRIGGER DE HISTORIAL: MOVIMIENTO SALIDA POR VENTA ---
+                        conn.execute("""INSERT INTO movimientos_inventario(
+                            fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                            (fecha_str, mes_str, mes_nom, anio, obj["Producto"], obj["Categoría"], obj["Talla"], "SALIDA", 1, costo_real, vendedor))
+                        
                         nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                         conn.commit()
 
@@ -747,6 +769,14 @@ else:
                                 item["Stock"] += 1
                                 conn.execute("UPDATE inventario SET stock=? WHERE id=?", (item["Stock"],item["id"]))
                                 break
+                        
+                        # --- TRIGGER DE HISTORIAL: MOVIMIENTO DEVOLUCIÓN POR ANULACIÓN ---
+                        conn.execute("""INSERT INTO movimientos_inventario(
+                            fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                            (datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%m"), MESES[datetime.now().strftime("%m")],
+                             datetime.now().year, v_sel["Producto"], v_sel["Categoría"], v_sel["Talla"], "DEVOLUCION", 1, v_sel["Costo"], st.session_state.usuario_actual))
+                        
                         conn.execute("DELETE FROM ventas WHERE id=?", (v_sel["id"],))
                         conn.commit()
                     st.session_state.ventas = [v for v in st.session_state.ventas if v["id"]!=id_sel]
@@ -766,6 +796,7 @@ else:
                 c_b   = st.number_input("Costo Unitario (S/)", min_value=0.0, value=40.0, step=1.0)
                 if st.button("💾 Guardar Ingreso"):
                     if prod:
+                        fecha_hoy = datetime.now()
                         with sqlite3.connect(DB_NAME, timeout=20) as conn:
                             existe = False
                             for item in st.session_state.inventario:
@@ -780,6 +811,14 @@ else:
                                 nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                                 st.session_state.inventario.append({"id":nid,"Producto":prod,"Categoría":cat,
                                                                      "Talla":tll,"Stock":stk,"Costo_Base":c_b})
+                            
+                            # --- TRIGGER DE HISTORIAL: MOVIMIENTO INGRESO ---
+                            conn.execute("""INSERT INTO movimientos_inventario(
+                                fecha, mes, mes_nombre, anio, producto, categoria, talla, tipo, cantidad, costo_unitario, usuario)
+                                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                (fecha_hoy.strftime("%d/%m/%Y"), fecha_hoy.strftime("%m"), MESES[fecha_hoy.strftime("%m")],
+                                 fecha_hoy.year, prod, cat, tll, "INGRESO", stk, c_b, st.session_state.usuario_actual))
+                            
                             conn.commit()
                         st.success("✅ Inventario actualizado."); time.sleep(0.5); st.rerun()
                     else:
@@ -799,6 +838,35 @@ else:
                 st.dataframe(bajo, use_container_width=True)
             else:
                 st.success("Almacén estable. Todo sobre el margen crítico.")
+                
+            # --- SECCIÓN VISTA DE AUDITORÍA HISTÓRICA DE INVENTARIO ---
+            st.divider()
+            st.subheader("📅 Historial de Movimientos")
+            with sqlite3.connect(DB_NAME) as conn:
+                movs = pd.read_sql_query("""
+                    SELECT fecha, producto, talla, tipo, cantidad, costo_unitario, usuario
+                    FROM movimientos_inventario
+                    ORDER BY id DESC
+                """, conn)
+            st.dataframe(movs, use_container_width=True)
+
+            st.subheader("📈 Inventario Histórico por Mes")
+            with sqlite3.connect(DB_NAME) as conn:
+                hist = pd.read_sql_query("""
+                    SELECT anio, mes_nombre, tipo, SUM(cantidad) cantidad
+                    FROM movimientos_inventario
+                    GROUP BY anio, mes_nombre, tipo
+                """, conn)
+
+            if not hist.empty:
+                pivot = hist.pivot_table(
+                    index="mes_nombre",
+                    columns="tipo",
+                    values="cantidad",
+                    aggfunc="sum"
+                ).fillna(0)
+                st.dataframe(pivot, use_container_width=True)
+                st.bar_chart(pivot)
 
     # ================================================================
     # MÓDULO: GASTOS
